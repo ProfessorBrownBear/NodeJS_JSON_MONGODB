@@ -5,7 +5,7 @@
 const mongoose = require('mongoose');
 
 // REPLACE WITH YOUR CONNECTION STRING
-const MONGODB_URI = 'mongodb+srv://user1:Orange11!a@cluster0.a1cvf3x.mongodb.net/collegeDB?retryWrites=true&w=majority';
+const MONGODB_URI = 'mongodb+srv://xxx/collegeDB?retryWrites=true&w=majority';
 
 // Define schemas (must match exactly with main application)
 const studentSchema = new mongoose.Schema({
