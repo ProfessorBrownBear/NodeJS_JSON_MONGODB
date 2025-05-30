@@ -188,6 +188,87 @@ const Course = mongoose.model('Course', courseSchema);
 // PART 2: Different Ways to Create Documents
 // ============================================
 
+// createStudentDocuments.js
+// Complete working code to create student documents with validation
+
+const mongoose = require('mongoose');
+
+// MongoDB connection string - REPLACE WITH YOUR OWN
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+// Connect to MongoDB
+mongoose.connect(MONGODB_URI);
+
+// Connection event handlers
+mongoose.connection.on('connected', () => {
+    console.log('✅ Connected to MongoDB Atlas');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB connection error:', err);
+});
+
+console.log('📋 Part 1: Defining Schemas with Validation Rules\n');
+
+// Student Schema with comprehensive validation
+const studentSchema = new mongoose.Schema({
+    studentId: {
+        type: String,
+        required: [true, 'Student ID is required'],
+        unique: true,
+        match: [/^S\d{5}$/, 'Student ID must be S followed by 5 digits (e.g., S12345)'],
+        index: true  // Creates an index for faster queries
+    },
+    name: {
+        type: String,
+        required: [true, 'Student name is required'],
+        trim: true,  // Removes whitespace
+        minlength: [2, 'Name must be at least 2 characters'],
+        maxlength: [100, 'Name cannot exceed 100 characters']
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,  // Automatically converts to lowercase
+        validate: {
+            validator: function(email) {
+                return /^\S+@\S+\.\S+$/.test(email);
+            },
+            message: 'Please enter a valid email address'
+        }
+    },
+    program: {
+        type: String,
+        required: true,
+        enum: {
+            values: ['Web Development', 'Mobile Development', 'Data Science', 'Full Stack Development'],
+            message: '{VALUE} is not a valid program'
+        }
+    },
+    enrollmentDate: {
+        type: Date,
+        default: Date.now  // Automatically sets current date
+    },
+    gpa: {
+        type: Number,
+        min: [0, 'GPA cannot be negative'],
+        max: [4.0, 'GPA cannot exceed 4.0'],
+        default: 0
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    }
+}, {
+    timestamps: true,  // Adds createdAt and updatedAt automatically
+    collection: 'students'  // Explicitly set collection name
+});
+
+// Create the Student model
+const Student = mongoose.model('Student', studentSchema);
+
+// Function to demonstrate create operations
 async function demonstrateCreateOperations() {
     try {
         console.log('📝 Part 2: Different Ways to Create Documents\n');
@@ -233,6 +314,13 @@ async function demonstrateCreateOperations() {
                 email: 'michael.b@college.com',
                 program: 'Full Stack Development',
                 gpa: 3.5
+            },
+            {
+                studentId: 'S20005',
+                name: 'Lisa Wang',
+                email: 'lisa.wang@college.com',
+                program: 'Web Development',
+                gpa: 3.9
             }
         ], { 
             ordered: true  // Stop on first error
@@ -249,7 +337,7 @@ async function demonstrateCreateOperations() {
                 program: 'Web Development'
             });
         } catch (error) {
-            console.log('❌ Validation Error:', error.message);
+            console.log('❌ Validation Error caught:', error.message);
             if (error.errors) {
                 Object.keys(error.errors).forEach(field => {
                     console.log(`   ${field}: ${error.errors[field].message}`);
@@ -257,14 +345,115 @@ async function demonstrateCreateOperations() {
             }
         }
         
-        // Create some courses
-        console.log('\n📚 Creating courses...');
-        const courses = await Course.insertMany([
-            { courseCode: 'WEB101', title: 'Introduction to Web Development', credits: 3 },
-            { courseCode: 'DATA201', title: 'Data Structures', credits: 4 },
-            { courseCode: 'MOB301', title: 'Mobile App Development', credits: 3 }
-        ]);
-        console.log(`✅ Created ${courses.length} courses`);
+        // Method 5: Create with some fields missing (using defaults)
+        console.log('\nMethod 5: Creating with default values');
+        const student5 = await Student.create({
+            studentId: 'S20006',
+            name: 'David Lee',
+            email: 'david.lee@college.com',
+            program: 'Data Science'
+            // Notice: gpa not provided, will use default of 0
+            // enrollmentDate not provided, will use current date
+            // isActive not provided, will use default of true
+        });
+        console.log('✅ Created with defaults:', student5.name);
+        console.log('   Default GPA:', student5.gpa);
+        console.log('   Default enrollment date:', student5.enrollmentDate);
+        console.log('   Default active status:', student5.isActive);
+        
+        // Display all created students
+        console.log('\n📊 Summary of all created students:');
+        const allStudents = await Student.find().sort('studentId');
+        console.log(`Total students in database: ${allStudents.length}`);
+        
+        console.log('\n📋 Student List:');
+        allStudents.forEach(student => {
+            console.log(`   ${student.studentId}: ${student.name} - ${student.program} (GPA: ${student.gpa})`);
+        });
+        
+        // Show schema validation in action
+        console.log('\n🛡️ Schema Validation Examples:');
+        
+        // Email validation
+        try {
+            await Student.create({
+                studentId: 'S20007',
+                name: 'Invalid Email Test',
+                email: 'not-an-email',  // Invalid email format
+                program: 'Web Development'
+            });
+        } catch (error) {
+            console.log('❌ Email validation failed:', error.errors.email.message);
+        }
+        
+        // Program enum validation
+        try {
+            await Student.create({
+                studentId: 'S20008',
+                name: 'Invalid Program Test',
+                email: 'test2@college.com',
+                program: 'Invalid Program'  // Not in enum
+            });
+        } catch (error) {
+            console.log('❌ Program validation failed:', error.errors.program.message);
+        }
+        
+        // GPA range validation
+        try {
+            await Student.create({
+                studentId: 'S20009',
+                name: 'Invalid GPA Test',
+                email: 'test3@college.com',
+                program: 'Web Development',
+                gpa: 5.0  // Exceeds maximum
+            });
+        } catch (error) {
+            console.log('❌ GPA validation failed:', error.errors.gpa.message);
+        }
+        
+        console.log('\n✨ Create operations completed successfully!');
+        
+    } catch (error) {
+        console.error('❌ Error in create operations:', error.message);
+        if (error.code === 11000) {
+            console.error('   Duplicate key error - a unique field already exists');
+        }
+    }
+}
+
+// Main function to run everything
+async function main() {
+    try {
+        // Wait for connection to be established
+        await new Promise(resolve => {
+            if (mongoose.connection.readyState === 1) {
+                resolve();
+            } else {
+                mongoose.connection.once('open', resolve);
+            }
+        });
+        
+        console.log('\n🚀 Starting document creation demo...\n');
+        
+        // Optional: Clear existing students to start fresh
+        console.log('🧹 Clearing existing students...');
+        await Student.deleteMany({});
+        console.log('✅ Collection cleared\n');
+        
+        // Run the create operations
+        await demonstrateCreateOperations();
+        
+    } catch (error) {
+        console.error('❌ Fatal error:', error);
+    } finally {
+        // Close the connection
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+// Run the main function
+main();
         
         // ============================================
         // PART 3: Understanding Collections
