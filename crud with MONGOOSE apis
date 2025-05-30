@@ -1,0 +1,1549 @@
+MongoDB CRUD Operations with Mongoose: From Basics to Advanced
+Introduction: Understanding Mongoose CRUD Operations
+Before we dive into the labs, let's understand what CRUD means:
+
+Create: Adding new documents to collections
+Read: Finding and retrieving documents
+Update: Modifying existing documents
+Delete: Removing documents from collections
+
+Mongoose provides multiple methods for each operation, and we'll explore them progressively.
+
+
+
+  Critical Concepts:
+
+Schemas define structure - Validation, defaults, methods
+Models provide the interface - CRUD operations on collections
+Filters control selection - Which documents to affect
+Updates can be partial - Only change what you need
+Deletes are permanent - Unless using soft delete pattern
+Collections contain documents - Drop collection = lose all data
+
+These labs provide a comprehensive foundation for understanding MongoDB operations with Mongoose, preparing students to work confidently with the College Enrollment System and beyond.
+
+
+
+Summary: Mongoose CRUD Operations
+Quick Reference Guide:
+CREATE Operations:
+
+    // Single document
+await Model.create(data)
+new Model(data).save()
+
+// Multiple documents
+await Model.insertMany([...])
+
+
+READ Operations:
+
+    // Find all/many
+await Model.find(filter)
+await Model.findOne(filter)
+await Model.findById(id)
+
+// With query operators
+await Model.find({ field: { $gte: value } })
+await Model.find({ $or: [...] })
+
+// With modifiers
+await Model.find().sort().limit().select()
+
+
+UPDATE Operations:    
+
+
+// Update methods
+await Model.updateOne(filter, update)
+await Model.updateMany(filter, update)
+await Model.findOneAndUpdate(filter, update, options)
+
+// Update operators
+{ $set: { field: value } }
+{ $inc: { field: amount } }
+{ $push: { array: element } }
+    
+
+DELETE Operations:
+
+// Delete methods
+await Model.deleteOne(filter)
+await Model.deleteMany(filter)
+await Model.findOneAndDelete(filter)
+
+// Soft delete pattern
+await Model.updateOne(filter, { isActive: false })
+
+
+COLLECTION Operations:    
+
+
+// Use with caution!
+await db.collection(name).rename(newName)
+await db.collection(name).drop()  // Deletes ALL documents!
+
+
+### Lab Example 1: Creating Documents and Understanding Schemas
+
+// lab1-create-operations.js
+// Creating documents, schemas, and understanding collections
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+// Connect to MongoDB
+mongoose.connect(MONGODB_URI);
+
+console.log('🔧 Lab 1: Creating Documents and Understanding Schemas\n');
+
+// ============================================
+// PART 1: Define Schemas with Validation
+// ============================================
+
+console.log('📋 Part 1: Defining Schemas with Validation Rules\n');
+
+// Student Schema with comprehensive validation
+const studentSchema = new mongoose.Schema({
+    studentId: {
+        type: String,
+        required: [true, 'Student ID is required'],
+        unique: true,
+        match: [/^S\d{5}$/, 'Student ID must be S followed by 5 digits (e.g., S12345)'],
+        index: true  // Creates an index for faster queries
+    },
+    name: {
+        type: String,
+        required: [true, 'Student name is required'],
+        trim: true,  // Removes whitespace
+        minlength: [2, 'Name must be at least 2 characters'],
+        maxlength: [100, 'Name cannot exceed 100 characters']
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,  // Automatically converts to lowercase
+        validate: {
+            validator: function(email) {
+                return /^\S+@\S+\.\S+$/.test(email);
+            },
+            message: 'Please enter a valid email address'
+        }
+    },
+    program: {
+        type: String,
+        required: true,
+        enum: {
+            values: ['Web Development', 'Mobile Development', 'Data Science', 'Full Stack Development'],
+            message: '{VALUE} is not a valid program'
+        }
+    },
+    enrollmentDate: {
+        type: Date,
+        default: Date.now  // Automatically sets current date
+    },
+    gpa: {
+        type: Number,
+        min: [0, 'GPA cannot be negative'],
+        max: [4.0, 'GPA cannot exceed 4.0'],
+        default: 0
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    }
+}, {
+    timestamps: true,  // Adds createdAt and updatedAt automatically
+    collection: 'students'  // Explicitly set collection name
+});
+
+// Course Schema
+const courseSchema = new mongoose.Schema({
+    courseCode: {
+        type: String,
+        required: true,
+        unique: true,
+        uppercase: true  // Automatically converts to uppercase
+    },
+    title: {
+        type: String,
+        required: true
+    },
+    credits: {
+        type: Number,
+        required: true,
+        min: 1,
+        max: 4
+    }
+});
+
+// Create models
+const Student = mongoose.model('Student', studentSchema);
+const Course = mongoose.model('Course', courseSchema);
+
+// ============================================
+// PART 2: Different Ways to Create Documents
+// ============================================
+
+async function demonstrateCreateOperations() {
+    try {
+        console.log('📝 Part 2: Different Ways to Create Documents\n');
+        
+        // Method 1: Create and save separately
+        console.log('Method 1: Using new Model() and save()');
+        const student1 = new Student({
+            studentId: 'S20001',
+            name: 'Emma Wilson',
+            email: 'emma.wilson@college.com',
+            program: 'Web Development',
+            gpa: 3.8
+        });
+        
+        // save() returns the saved document
+        const savedStudent1 = await student1.save();
+        console.log('✅ Created:', savedStudent1.name, '- ID:', savedStudent1._id);
+        
+        // Method 2: Create directly with Model.create()
+        console.log('\nMethod 2: Using Model.create()');
+        const student2 = await Student.create({
+            studentId: 'S20002',
+            name: 'James Chen',
+            email: 'james.chen@college.com',
+            program: 'Data Science',
+            gpa: 3.9
+        });
+        console.log('✅ Created:', student2.name, '- ID:', student2._id);
+        
+        // Method 3: Create multiple documents with insertMany()
+        console.log('\nMethod 3: Using Model.insertMany() for bulk creation');
+        const multipleStudents = await Student.insertMany([
+            {
+                studentId: 'S20003',
+                name: 'Sofia Rodriguez',
+                email: 'sofia.r@college.com',
+                program: 'Mobile Development',
+                gpa: 3.7
+            },
+            {
+                studentId: 'S20004',
+                name: 'Michael Brown',
+                email: 'michael.b@college.com',
+                program: 'Full Stack Development',
+                gpa: 3.5
+            }
+        ], { 
+            ordered: true  // Stop on first error
+        });
+        console.log(`✅ Created ${multipleStudents.length} students in bulk`);
+        
+        // Method 4: Create with validation error handling
+        console.log('\nMethod 4: Handling validation errors');
+        try {
+            await Student.create({
+                studentId: 'INVALID',  // This will fail validation
+                name: 'Test Student',
+                email: 'test@college.com',
+                program: 'Web Development'
+            });
+        } catch (error) {
+            console.log('❌ Validation Error:', error.message);
+            if (error.errors) {
+                Object.keys(error.errors).forEach(field => {
+                    console.log(`   ${field}: ${error.errors[field].message}`);
+                });
+            }
+        }
+        
+        // Create some courses
+        console.log('\n📚 Creating courses...');
+        const courses = await Course.insertMany([
+            { courseCode: 'WEB101', title: 'Introduction to Web Development', credits: 3 },
+            { courseCode: 'DATA201', title: 'Data Structures', credits: 4 },
+            { courseCode: 'MOB301', title: 'Mobile App Development', credits: 3 }
+        ]);
+        console.log(`✅ Created ${courses.length} courses`);
+        
+        // ============================================
+        // PART 3: Understanding Collections
+        // ============================================
+        
+        console.log('\n🗂️ Part 3: Understanding Collections\n');
+        
+        // Collections are created automatically when first document is inserted
+        const collections = await mongoose.connection.db.listCollections().toArray();
+        console.log('📁 Collections in database:');
+        collections.forEach(col => {
+            console.log(`   - ${col.name}`);
+        });
+        
+        // Check document count in each collection
+        const studentCount = await Student.countDocuments();
+        const courseCount = await Course.countDocuments();
+        console.log(`\n📊 Document counts:`);
+        console.log(`   Students: ${studentCount}`);
+        console.log(`   Courses: ${courseCount}`);
+        
+        // ============================================
+        // PART 4: Schema Methods and Virtuals
+        // ============================================
+        
+        console.log('\n🔧 Part 4: Schema Features\n');
+        
+        // Add instance method to schema
+        studentSchema.methods.getInfo = function() {
+            return `${this.name} (${this.studentId}) - ${this.program}`;
+        };
+        
+        // Add static method to schema
+        studentSchema.statics.findByProgram = function(program) {
+            return this.find({ program: program });
+        };
+        
+        // Add virtual property
+        studentSchema.virtual('isHonorStudent').get(function() {
+            return this.gpa >= 3.5;
+        });
+        
+        // Recreate model with new schema features
+        const StudentWithMethods = mongoose.model('StudentWithMethods', studentSchema, 'students');
+        
+        // Demonstrate schema features
+        const student = await StudentWithMethods.findOne({ studentId: 'S20001' });
+        console.log('Instance method:', student.getInfo());
+        console.log('Virtual property - Honor Student:', student.isHonorStudent);
+        
+        const csStudents = await StudentWithMethods.findByProgram('Data Science');
+        console.log(`\nStatic method - Found ${csStudents.length} Data Science students`);
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. Schemas define structure, validation, and behavior');
+        console.log('2. Multiple ways to create documents: new/save, create(), insertMany()');
+        console.log('3. Collections are created automatically on first insert');
+        console.log('4. Validation runs before saving to database');
+        console.log('5. Schemas can have methods, statics, and virtuals');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateCreateOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+runLab();
+
+
+### Lab Example 2: Reading Documents with Filters
+
+// lab2-read-operations.js
+// Reading documents with various filters and query methods
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+mongoose.connect(MONGODB_URI);
+
+console.log('🔍 Lab 2: Reading Documents with Filters\n');
+
+// Define schemas
+const studentSchema = new mongoose.Schema({
+    studentId: String,
+    name: String,
+    email: String,
+    program: String,
+    gpa: Number,
+    enrollmentDate: Date,
+    isActive: { type: Boolean, default: true }
+}, { timestamps: true });
+
+const courseSchema = new mongoose.Schema({
+    courseCode: String,
+    title: String,
+    credits: Number,
+    instructor: String,
+    maxStudents: { type: Number, default: 30 }
+});
+
+const Student = mongoose.model('Student', studentSchema);
+const Course = mongoose.model('Course', courseSchema);
+
+async function demonstrateReadOperations() {
+    try {
+        // ============================================
+        // PART 1: Basic Find Operations
+        // ============================================
+        
+        console.log('📖 Part 1: Basic Find Operations\n');
+        
+        // Find all documents
+        console.log('1. Find all students:');
+        const allStudents = await Student.find();
+        console.log(`   Found ${allStudents.length} students`);
+        
+        // Find with simple filter
+        console.log('\n2. Find students in Web Development:');
+        const webStudents = await Student.find({ program: 'Web Development' });
+        webStudents.forEach(s => console.log(`   - ${s.name} (${s.studentId})`));
+        
+        // FindOne - returns first matching document
+        console.log('\n3. FindOne - Get first Data Science student:');
+        const dataStudent = await Student.findOne({ program: 'Data Science' });
+        console.log(`   ${dataStudent ? dataStudent.name : 'Not found'}`);
+        
+        // FindById - find by MongoDB _id
+        console.log('\n4. FindById:');
+        if (allStudents.length > 0) {
+            const foundById = await Student.findById(allStudents[0]._id);
+            console.log(`   Found: ${foundById.name}`);
+        }
+        
+        // ============================================
+        // PART 2: Query Operators
+        // ============================================
+        
+        console.log('\n📊 Part 2: Query Operators\n');
+        
+        // Comparison operators
+        console.log('1. Comparison operators:');
+        
+        // $gt, $gte, $lt, $lte
+        const highGpaStudents = await Student.find({ gpa: { $gte: 3.5 } });
+        console.log(`   Students with GPA >= 3.5: ${highGpaStudents.length}`);
+        highGpaStudents.forEach(s => console.log(`     - ${s.name}: ${s.gpa}`));
+        
+        // $ne (not equal)
+        const notWebDev = await Student.find({ program: { $ne: 'Web Development' } });
+        console.log(`\n   Students NOT in Web Development: ${notWebDev.length}`);
+        
+        // $in and $nin
+        console.log('\n2. $in and $nin operators:');
+        const techPrograms = await Student.find({ 
+            program: { $in: ['Web Development', 'Mobile Development'] } 
+        });
+        console.log(`   Students in Web or Mobile Development: ${techPrograms.length}`);
+        
+        // ============================================
+        // PART 3: Logical Operators
+        // ============================================
+        
+        console.log('\n🔗 Part 3: Logical Operators\n');
+        
+        // $and - all conditions must match
+        console.log('1. $and operator:');
+        const highGpaWebStudents = await Student.find({
+            $and: [
+                { program: 'Web Development' },
+                { gpa: { $gte: 3.5 } }
+            ]
+        });
+        console.log(`   Web Dev students with GPA >= 3.5: ${highGpaWebStudents.length}`);
+        
+        // $or - at least one condition must match
+        console.log('\n2. $or operator:');
+        const excellentOrDataStudents = await Student.find({
+            $or: [
+                { gpa: { $gte: 3.8 } },
+                { program: 'Data Science' }
+            ]
+        });
+        console.log(`   Students with GPA >= 3.8 OR in Data Science: ${excellentOrDataStudents.length}`);
+        
+        // Complex query combining operators
+        console.log('\n3. Complex query:');
+        const complexQuery = await Student.find({
+            $and: [
+                { isActive: true },
+                { $or: [
+                    { gpa: { $gte: 3.7 } },
+                    { program: 'Full Stack Development' }
+                ]},
+                { enrollmentDate: { $gte: new Date('2024-01-01') } }
+            ]
+        });
+        console.log(`   Active students with (GPA >= 3.7 OR Full Stack) enrolled after Jan 2024: ${complexQuery.length}`);
+        
+        // ============================================
+        // PART 4: String Queries
+        // ============================================
+        
+        console.log('\n📝 Part 4: String Queries\n');
+        
+        // Regular expressions
+        console.log('1. Regular expression queries:');
+        
+        // Case-insensitive search
+        const studentsWithJ = await Student.find({ 
+            name: /^j/i  // Names starting with J or j
+        });
+        console.log(`   Students with names starting with J: ${studentsWithJ.length}`);
+        studentsWithJ.forEach(s => console.log(`     - ${s.name}`));
+        
+        // Contains substring
+        const emailSearch = await Student.find({
+            email: /wilson/i  // Emails containing 'wilson'
+        });
+        console.log(`\n   Students with 'wilson' in email: ${emailSearch.length}`);
+        
+        // ============================================
+        // PART 5: Query Modifiers
+        // ============================================
+        
+        console.log('\n⚙️ Part 5: Query Modifiers\n');
+        
+        // Select specific fields
+        console.log('1. Field selection:');
+        const namesOnly = await Student.find()
+            .select('name studentId program -_id');  // Exclude _id
+        console.log('   Selected fields only:');
+        console.log('   ', namesOnly[0]);
+        
+        // Sorting
+        console.log('\n2. Sorting:');
+        const sortedByGpa = await Student.find()
+            .sort({ gpa: -1, name: 1 })  // Descending GPA, ascending name
+            .limit(5);
+        console.log('   Top 5 students by GPA:');
+        sortedByGpa.forEach((s, i) => console.log(`     ${i+1}. ${s.name}: ${s.gpa}`));
+        
+        // Skip and limit (pagination)
+        console.log('\n3. Pagination with skip and limit:');
+        const page = 1;
+        const pageSize = 3;
+        const paginatedStudents = await Student.find()
+            .skip((page - 1) * pageSize)
+            .limit(pageSize);
+        console.log(`   Page ${page} (${pageSize} items per page):`);
+        paginatedStudents.forEach(s => console.log(`     - ${s.name}`));
+        
+        // ============================================
+        // PART 6: Counting and Existence
+        // ============================================
+        
+        console.log('\n🔢 Part 6: Counting and Existence\n');
+        
+        // Count documents
+        const totalCount = await Student.countDocuments();
+        const activeCount = await Student.countDocuments({ isActive: true });
+        const webDevCount = await Student.countDocuments({ program: 'Web Development' });
+        
+        console.log('Document counts:');
+        console.log(`   Total students: ${totalCount}`);
+        console.log(`   Active students: ${activeCount}`);
+        console.log(`   Web Development students: ${webDevCount}`);
+        
+        // Check existence
+        const hasHighGpa = await Student.exists({ gpa: { $gte: 3.9 } });
+        console.log(`\nAny students with GPA >= 3.9? ${hasHighGpa ? 'Yes' : 'No'}`);
+        
+        // ============================================
+        // PART 7: Advanced Queries
+        // ============================================
+        
+        console.log('\n🚀 Part 7: Advanced Query Features\n');
+        
+        // Distinct values
+        const programs = await Student.distinct('program');
+        console.log('Distinct programs:', programs);
+        
+        // Query building with where()
+        const whereQuery = await Student
+            .where('gpa').gte(3.0)
+            .where('program').in(['Web Development', 'Data Science'])
+            .where('isActive').equals(true)
+            .select('name program gpa')
+            .exec();
+        console.log(`\nWhere query results: ${whereQuery.length} students`);
+        
+        // Using cursor for large datasets
+        console.log('\n📜 Using cursor for iteration:');
+        const cursor = Student.find().cursor();
+        let count = 0;
+        
+        // Process documents one at a time
+        for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+            count++;
+            if (count <= 3) {
+                console.log(`   ${count}. ${doc.name}`);
+            }
+        }
+        console.log(`   ... processed ${count} total documents`);
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. find() returns all matching documents, findOne() returns first match');
+        console.log('2. Query operators: $gt, $gte, $lt, $lte, $ne, $in, $nin');
+        console.log('3. Logical operators: $and, $or, $not, $nor');
+        console.log('4. Use select() to choose fields, sort() to order results');
+        console.log('5. skip() and limit() enable pagination');
+        console.log('6. Regular expressions enable flexible string matching');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateReadOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+runLab();
+                                                                                                                                                                                                                        
+                                                                                                                                                                                                                        
+### Lab Example 3: Updating Documents with Filters
+                                                                                                                                                                                                                        
+// lab3-update-operations.js
+// Updating documents with various methods and filters
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+mongoose.connect(MONGODB_URI);
+
+console.log('✏️ Lab 3: Updating Documents with Filters\n');
+
+// Define schemas
+const studentSchema = new mongoose.Schema({
+    studentId: String,
+    name: String,
+    email: String,
+    program: String,
+    gpa: Number,
+    credits: { type: Number, default: 0 },
+    status: { type: String, default: 'Active' },
+    lastModified: Date,
+    notes: [String],
+    contact: {
+        phone: String,
+        address: String
+    }
+}, { timestamps: true });
+
+const Student = mongoose.model('Student', studentSchema);
+
+async function demonstrateUpdateOperations() {
+    try {
+        // First, ensure we have some data to work with
+        console.log('🔧 Setting up test data...\n');
+        
+        // ============================================
+        // PART 1: Basic Update Methods
+        // ============================================
+        
+        console.log('📝 Part 1: Basic Update Methods\n');
+        
+        // Method 1: Find, modify, and save
+        console.log('1. Find, modify, and save pattern:');
+        const student1 = await Student.findOne({ studentId: 'S10001' });
+        if (student1) {
+            console.log(`   Before: ${student1.name}, GPA: ${student1.gpa}`);
+            student1.gpa = 3.85;
+            student1.lastModified = new Date();
+            await student1.save();
+            console.log(`   After: ${student1.name}, GPA: ${student1.gpa}`);
+        }
+        
+        // Method 2: updateOne - updates first matching document
+        console.log('\n2. updateOne - Update first matching document:');
+        const updateResult = await Student.updateOne(
+            { program: 'Web Development' },  // filter
+            { 
+                $set: { status: 'Active - Dean\'s List' },
+                $inc: { credits: 3 }  // Increment credits by 3
+            }
+        );
+        console.log(`   Matched: ${updateResult.matchedCount}, Modified: ${updateResult.modifiedCount}`);
+        
+        // Method 3: updateMany - updates all matching documents
+        console.log('\n3. updateMany - Update all matching documents:');
+        const updateManyResult = await Student.updateMany(
+            { gpa: { $gte: 3.5 } },  // filter: all students with GPA >= 3.5
+            { 
+                $set: { status: 'Honor Student' },
+                $currentDate: { lastModified: true }  // Set to current date
+            }
+        );
+        console.log(`   Matched: ${updateManyResult.matchedCount}, Modified: ${updateManyResult.modifiedCount}`);
+        
+        // Method 4: findOneAndUpdate - returns the document
+        console.log('\n4. findOneAndUpdate - Update and return document:');
+        const updatedStudent = await Student.findOneAndUpdate(
+            { studentId: 'S10002' },
+            { 
+                $set: { program: 'Full Stack Development' },
+                $inc: { gpa: 0.1 }  // Increase GPA by 0.1
+            },
+            { 
+                new: true,  // Return updated document (not original)
+                runValidators: true  // Run schema validation
+            }
+        );
+        if (updatedStudent) {
+            console.log(`   Updated: ${updatedStudent.name} - New program: ${updatedStudent.program}`);
+        }
+        
+        // ============================================
+        // PART 2: Update Operators
+        // ============================================
+        
+        console.log('\n🔧 Part 2: Update Operators\n');
+        
+        // $set - Set field values
+        console.log('1. $set operator:');
+        await Student.updateOne(
+            { studentId: 'S10003' },
+            { 
+                $set: { 
+                    'contact.phone': '555-1234',
+                    'contact.address': '123 College St'
+                }
+            }
+        );
+        console.log('   Updated contact information');
+        
+        // $unset - Remove fields
+        console.log('\n2. $unset operator:');
+        await Student.updateOne(
+            { studentId: 'S10003' },
+            { $unset: { 'contact.address': '' } }  // Removes the address field
+        );
+        console.log('   Removed address field');
+        
+        // $inc - Increment numeric values
+        console.log('\n3. $inc operator:');
+        await Student.updateMany(
+            { program: 'Data Science' },
+            { $inc: { credits: 4, gpa: -0.1 } }  // Add 4 credits, decrease GPA by 0.1
+        );
+        console.log('   Incremented credits and adjusted GPA for Data Science students');
+        
+        // $mul - Multiply numeric values
+        console.log('\n4. $mul operator:');
+        await Student.updateOne(
+            { studentId: 'S10004' },
+            { $mul: { credits: 1.5 } }  // Multiply credits by 1.5
+        );
+        console.log('   Multiplied credits by 1.5');
+        
+        // $min and $max - Update only if value is less/greater
+        console.log('\n5. $min and $max operators:');
+        await Student.updateMany(
+            {},
+            { 
+                $min: { gpa: 4.0 },  // Ensure GPA doesn't exceed 4.0
+                $max: { credits: 0 }  // Ensure credits isn't negative
+            }
+        );
+        console.log('   Applied GPA cap and credit floor');
+        
+        // ============================================
+        // PART 3: Array Update Operators
+        // ============================================
+        
+        console.log('\n📚 Part 3: Array Update Operators\n');
+        
+        // $push - Add element to array
+        console.log('1. $push operator:');
+        await Student.updateOne(
+            { studentId: 'S10001' },
+            { $push: { notes: 'Excellent performance in midterms' } }
+        );
+        console.log('   Added note to student');
+        
+        // $addToSet - Add unique element to array
+        console.log('\n2. $addToSet operator:');
+        await Student.updateOne(
+            { studentId: 'S10001' },
+            { 
+                $addToSet: { 
+                    notes: { 
+                        $each: ['Dean\'s List Fall 2024', 'Excellent performance in midterms'] 
+                    }
+                } 
+            }
+        );
+        console.log('   Added unique notes (no duplicates)');
+        
+        // $pull - Remove elements from array
+        console.log('\n3. $pull operator:');
+        await Student.updateOne(
+            { studentId: 'S10001' },
+            { $pull: { notes: 'Excellent performance in midterms' } }
+        );
+        console.log('   Removed specific note');
+        
+        // $pop - Remove first or last element
+        console.log('\n4. $pop operator:');
+        await Student.updateOne(
+            { studentId: 'S10001' },
+            { $pop: { notes: -1 } }  // -1 removes first, 1 removes last
+        );
+        console.log('   Removed first note from array');
+        
+        // ============================================
+        // PART 4: Conditional Updates
+        // ============================================
+        
+        console.log('\n🎯 Part 4: Conditional Updates\n');
+        
+        // Update with complex conditions
+        console.log('1. Update based on current values:');
+        const conditionalUpdate = await Student.updateMany(
+            { 
+                gpa: { $gte: 3.7 },
+                credits: { $gte: 60 }
+            },
+            { 
+                $set: { status: 'Graduation Candidate - Honors' }
+            }
+        );
+        console.log(`   Updated ${conditionalUpdate.modifiedCount} high-achieving students`);
+        
+        // Bulk updates with different conditions
+        console.log('\n2. Bulk updates with bulkWrite:');
+        const bulkOps = await Student.bulkWrite([
+            {
+                updateMany: {
+                    filter: { gpa: { $lt: 2.0 } },
+                    update: { $set: { status: 'Academic Probation' } }
+                }
+            },
+            {
+                updateMany: {
+                    filter: { gpa: { $gte: 2.0, $lt: 3.0 } },
+                    update: { $set: { status: 'Good Standing' } }
+                }
+            },
+            {
+                updateMany: {
+                    filter: { gpa: { $gte: 3.0 } },
+                    update: { $set: { status: 'Excellent Standing' } }
+                }
+            }
+        ]);
+        console.log(`   Bulk operation results:`, bulkOps);
+        
+        // ============================================
+        // PART 5: Upsert Operations
+        // ============================================
+        
+        console.log('\n🔄 Part 5: Upsert Operations\n');
+        
+        // Upsert - Update if exists, insert if not
+        console.log('1. Upsert example:');
+        const upsertResult = await Student.updateOne(
+            { studentId: 'S99999' },  // This student doesn't exist
+            { 
+                $set: {
+                    name: 'New Student',
+                    email: 'new.student@college.com',
+                    program: 'Web Development',
+                    gpa: 3.0
+                },
+                $setOnInsert: {  // Only set these on insert, not update
+                    enrollmentDate: new Date(),
+                    credits: 0
+                }
+            },
+            { upsert: true }
+        );
+        console.log(`   Upserted: ${upsertResult.upsertedCount > 0 ? 'Created new document' : 'Updated existing'}`);
+        
+        // ============================================
+        // PART 6: Advanced Update Patterns
+        // ============================================
+        
+        console.log('\n🚀 Part 6: Advanced Update Patterns\n');
+        
+        // Pipeline update (MongoDB 4.2+)
+        console.log('1. Update with aggregation pipeline:');
+        await Student.updateMany(
+            {},
+            [
+                {
+                    $set: {
+                        gradeLevel: {
+                            $switch: {
+                                branches: [
+                                    { case: { $lt: ['$credits', 30] }, then: 'Freshman' },
+                                    { case: { $lt: ['$credits', 60] }, then: 'Sophomore' },
+                                    { case: { $lt: ['$credits', 90] }, then: 'Junior' },
+                                    { case: { $gte: ['$credits', 90] }, then: 'Senior' }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]
+        );
+        console.log('   Added grade level based on credits');
+        
+        // Show final results
+        console.log('\n📊 Final Results Sample:');
+        const finalResults = await Student.find()
+            .select('name program gpa credits status gradeLevel')
+            .limit(5);
+        finalResults.forEach(s => {
+            console.log(`   ${s.name}: ${s.program}, GPA: ${s.gpa}, Status: ${s.status}`);
+        });
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. Multiple update methods: save(), updateOne(), updateMany(), findOneAndUpdate()');
+        console.log('2. Update operators: $set, $unset, $inc, $mul, $min, $max');
+        console.log('3. Array operators: $push, $addToSet, $pull, $pop');
+        console.log('4. Upsert creates document if it doesn\'t exist');
+        console.log('5. bulkWrite() enables multiple operations in one call');
+        console.log('6. Aggregation pipelines in updates allow complex transformations');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateUpdateOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+runLab();
+                                                                                                                                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                                                                                                                            
+###        Lab Example 4: Deleting Documents with Filters
+                                                                                                                                                                                                                                                                                                                                            
+// lab4-delete-operations.js
+// Deleting documents with various methods and filters
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+mongoose.connect(MONGODB_URI);
+
+console.log('🗑️ Lab 4: Deleting Documents with Filters\n');
+
+// Define schemas
+const studentSchema = new mongoose.Schema({
+    studentId: String,
+    name: String,
+    email: String,
+    program: String,
+    gpa: Number,
+    status: String,
+    isActive: { type: Boolean, default: true },
+    graduationYear: Number,
+    deletedAt: Date,  // For soft delete
+    deletedBy: String  // For soft delete tracking
+}, { timestamps: true });
+
+// Add a pre-remove hook
+studentSchema.pre('remove', function(next) {
+    console.log(`   🔔 Pre-remove hook: About to delete ${this.name}`);
+    next();
+});
+
+const Student = mongoose.model('Student', studentSchema);
+
+// Archive schema for demonstrating data preservation
+const studentArchiveSchema = new mongoose.Schema({
+    originalId: mongoose.Schema.Types.ObjectId,
+    studentData: Object,
+    deletedAt: { type: Date, default: Date.now },
+    reason: String
+});
+
+const StudentArchive = mongoose.model('StudentArchive', studentArchiveSchema);
+
+async function demonstrateDeleteOperations() {
+    try {
+        // Setup: Create test data
+        console.log('🔧 Creating test data for deletion examples...\n');
+        
+        await Student.deleteMany({}); // Clear existing data
+        
+        const testStudents = await Student.insertMany([
+            { studentId: 'S30001', name: 'Alice Johnson', program: 'Web Development', gpa: 3.8, graduationYear: 2020 },
+            { studentId: 'S30002', name: 'Bob Smith', program: 'Data Science', gpa: 2.5, graduationYear: 2021 },
+            { studentId: 'S30003', name: 'Carol Davis', program: 'Web Development', gpa: 3.2, graduationYear: 2022 },
+            { studentId: 'S30004', name: 'David Wilson', program: 'Mobile Development', gpa: 1.8, status: 'Withdrawn' },
+            { studentId: 'S30005', name: 'Emma Brown', program: 'Data Science', gpa: 3.9, graduationYear: 2023 },
+            { studentId: 'S30006', name: 'Frank Miller', program: 'Web Development', gpa: 2.1, status: 'Academic Probation' },
+            { studentId: 'S30007', name: 'Grace Lee', program: 'Full Stack Development', gpa: 3.5 },
+            { studentId: 'S30008', name: 'Henry Taylor', program: 'Mobile Development', gpa: 1.5, status: 'Withdrawn' }
+        ]);
+        
+        console.log(`✅ Created ${testStudents.length} test students\n`);
+        
+        // ============================================
+        // PART 1: Basic Delete Methods
+        // ============================================
+        
+        console.log('🗑️ Part 1: Basic Delete Methods\n');
+        
+        // Show initial count
+        let count = await Student.countDocuments();
+        console.log(`Starting with ${count} students\n`);
+        
+        // Method 1: deleteOne - Deletes first matching document
+        console.log('1. deleteOne - Delete first matching document:');
+        const deleteOneResult = await Student.deleteOne({ gpa: { $lt: 2.0 } });
+        console.log(`   Deleted ${deleteOneResult.deletedCount} student with GPA < 2.0`);
+        
+        // Method 2: deleteMany - Deletes all matching documents
+        console.log('\n2. deleteMany - Delete multiple documents:');
+        const deleteManyResult = await Student.deleteMany({ 
+            graduationYear: { $lt: 2022 } 
+        });
+        console.log(`   Deleted ${deleteManyResult.deletedCount} students who graduated before 2022`);
+        
+        // Method 3: findOneAndDelete - Returns the deleted document
+        console.log('\n3. findOneAndDelete - Delete and return document:');
+        const deletedStudent = await Student.findOneAndDelete(
+            { status: 'Withdrawn' },
+            { sort: { gpa: 1 } }  // Delete the one with lowest GPA
+        );
+        if (deletedStudent) {
+            console.log(`   Deleted: ${deletedStudent.name} (GPA: ${deletedStudent.gpa})`);
+        }
+        
+        // Method 4: findByIdAndDelete
+        console.log('\n4. findByIdAndDelete:');
+        const remainingStudent = await Student.findOne();
+        if (remainingStudent) {
+            const deletedById = await Student.findByIdAndDelete(remainingStudent._id);
+            console.log(`   Deleted by ID: ${deletedById.name}`);
+        }
+        
+        // Method 5: Document remove method
+        console.log('\n5. Document remove method:');
+        const studentToRemove = await Student.findOne({ program: 'Web Development' });
+        if (studentToRemove) {
+            await studentToRemove.remove();  // Triggers pre-remove hook
+            console.log(`   Removed using document method`);
+        }
+        
+        // Show remaining count
+        count = await Student.countDocuments();
+        console.log(`\n📊 Remaining students: ${count}`);
+        
+        // ============================================
+        // PART 2: Soft Delete Pattern
+        // ============================================
+        
+        console.log('\n♻️ Part 2: Soft Delete Pattern\n');
+        
+        // Re-seed data for soft delete examples
+        await Student.deleteMany({});
+        await Student.insertMany([
+            { studentId: 'S40001', name: 'John Doe', program: 'Web Development', gpa: 3.5 },
+            { studentId: 'S40002', name: 'Jane Smith', program: 'Data Science', gpa: 3.8 },
+            { studentId: 'S40003', name: 'Mike Johnson', program: 'Mobile Development', gpa: 2.9 }
+        ]);
+        
+        // Implement soft delete
+        console.log('1. Soft delete implementation:');
+        const softDeleteResult = await Student.updateMany(
+            { gpa: { $lt: 3.0 } },
+            { 
+                $set: { 
+                    isActive: false,
+                    deletedAt: new Date(),
+                    deletedBy: 'System - Low GPA'
+                }
+            }
+        );
+        console.log(`   Soft deleted ${softDeleteResult.modifiedCount} students`);
+        
+        // Query excluding soft deleted
+        console.log('\n2. Query active students only:');
+        const activeStudents = await Student.find({ isActive: true });
+        console.log(`   Active students: ${activeStudents.length}`);
+        activeStudents.forEach(s => console.log(`     - ${s.name}`));
+        
+        // Show all including soft deleted
+        console.log('\n3. All students (including soft deleted):');
+        const allStudents = await Student.find();
+        allStudents.forEach(s => {
+            console.log(`     - ${s.name}: ${s.isActive ? 'Active' : 'Deleted on ' + s.deletedAt}`);
+        });
+        
+        // ============================================
+        // PART 3: Archive Before Delete
+        // ============================================
+        
+        console.log('\n📦 Part 3: Archive Before Delete Pattern\n');
+        
+        // Function to archive and delete
+        async function archiveAndDelete(filter, reason) {
+            // Find documents to archive
+            const toArchive = await Student.find(filter);
+            
+            if (toArchive.length > 0) {
+                // Archive documents
+                const archives = toArchive.map(student => ({
+                    originalId: student._id,
+                    studentData: student.toObject(),
+                    reason: reason
+                }));
+                
+                await StudentArchive.insertMany(archives);
+                console.log(`   📦 Archived ${archives.length} students`);
+                
+                // Now delete them
+                const deleteResult = await Student.deleteMany(filter);
+                console.log(`   🗑️ Deleted ${deleteResult.deletedCount} students`);
+                
+                return deleteResult;
+            }
+            
+            return { deletedCount: 0 };
+        }
+        
+        // Use the archive function
+        console.log('1. Archive and delete inactive students:');
+        await archiveAndDelete(
+            { isActive: false },
+            'Inactive student cleanup'
+        );
+        
+        // Show archived data
+        console.log('\n2. View archived students:');
+        const archived = await StudentArchive.find();
+        archived.forEach(a => {
+            console.log(`   📁 ${a.studentData.name} - Archived: ${a.deletedAt.toLocaleDateString()}`);
+            console.log(`      Reason: ${a.reason}`);
+        });
+        
+        // ============================================
+        // PART 4: Bulk Delete Operations
+        // ============================================
+        
+        console.log('\n📋 Part 4: Bulk Delete Operations\n');
+        
+        // Re-seed for bulk operations
+        await Student.deleteMany({});
+        const bulkStudents = [];
+        for (let i = 1; i <= 20; i++) {
+            bulkStudents.push({
+                studentId: `S5000${i}`,
+                name: `Student ${i}`,
+                program: ['Web Development', 'Data Science', 'Mobile Development'][i % 3],
+                gpa: 2.0 + (Math.random() * 2),
+                graduationYear: 2020 + (i % 5)
+            });
+        }
+        await Student.insertMany(bulkStudents);
+        
+        console.log('1. Bulk delete with multiple conditions:');
+        const bulkDeleteOps = await Student.bulkWrite([
+            {
+                deleteMany: {
+                    filter: { gpa: { $lt: 2.5 }, graduationYear: 2020 }
+                }
+            },
+            {
+                deleteMany: {
+                    filter: { program: 'Mobile Development', gpa: { $lt: 3.0 } }
+                }
+            },
+            {
+                deleteOne: {
+                    filter: { studentId: 'S50005' }
+                }
+            }
+        ]);
+        
+        console.log('   Bulk operation results:', bulkDeleteOps);
+        
+        // ============================================
+        // PART 5: Delete with Relationships
+        // ============================================
+        
+        console.log('\n🔗 Part 5: Handling Related Data on Delete\n');
+        
+        // Enrollment schema to demonstrate cascading
+        const enrollmentSchema = new mongoose.Schema({
+            student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
+            course: String,
+            semester: String
+        });
+        
+        const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
+        
+        // Create a student and related enrollments
+        const newStudent = await Student.create({
+            studentId: 'S60001',
+            name: 'Test Student',
+            program: 'Web Development',
+            gpa: 3.5
+        });
+        
+        await Enrollment.insertMany([
+            { student: newStudent._id, course: 'WEB101', semester: 'Fall 2024' },
+            { student: newStudent._id, course: 'WEB102', semester: 'Fall 2024' }
+        ]);
+        
+        console.log('1. Check related data before delete:');
+        const relatedEnrollments = await Enrollment.countDocuments({ student: newStudent._id });
+        console.log(`   Student has ${relatedEnrollments} enrollments`);
+        
+        // Delete with cascade
+        console.log('\n2. Cascading delete (manual):');
+        await Enrollment.deleteMany({ student: newStudent._id });
+        await Student.deleteOne({ _id: newStudent._id });
+        console.log('   Deleted student and related enrollments');
+        
+        // Final statistics
+        console.log('\n📊 Final Statistics:');
+        const finalCount = await Student.countDocuments();
+        const archiveCount = await StudentArchive.countDocuments();
+        const enrollmentCount = await Enrollment.countDocuments();
+        
+        console.log(`   Active students: ${finalCount}`);
+        console.log(`   Archived students: ${archiveCount}`);
+        console.log(`   Remaining enrollments: ${enrollmentCount}`);
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. Delete methods: deleteOne(), deleteMany(), findOneAndDelete()');
+        console.log('2. Soft delete pattern preserves data while marking as deleted');
+        console.log('3. Archive before delete ensures data recovery is possible');
+        console.log('4. Always handle related data before deleting parent documents');
+        console.log('5. bulkWrite() enables efficient multiple delete operations');
+        console.log('6. Pre-remove hooks can perform cleanup before deletion');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateDeleteOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+runLab();
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+###     Lab Example 5: Collection Management - Renaming and Deleting Collections
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+// lab5-collection-management.js
+// Managing collections - renaming, deleting, and understanding impacts
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+mongoose.connect(MONGODB_URI);
+
+console.log('🗂️ Lab 5: Collection Management - Renaming and Deleting Collections\n');
+
+// Define test schemas
+const testSchema = new mongoose.Schema({
+    name: String,
+    value: Number,
+    category: String,
+    createdAt: { type: Date, default: Date.now }
+});
+
+// Create models with explicit collection names
+const TestModel = mongoose.model('TestModel', testSchema, 'test_collection');
+const TempModel = mongoose.model('TempModel', testSchema, 'temp_collection');
+
+async function demonstrateCollectionOperations() {
+    try {
+        // Get direct access to MongoDB native driver
+        const db = mongoose.connection.db;
+        
+        console.log('🔍 Understanding MongoDB Collection Operations\n');
+        console.log('⚠️  IMPORTANT: Collection operations affect ALL documents!');
+        console.log('================================================\n');
+        
+        // ============================================
+        // PART 1: Collection Information
+        // ============================================
+        
+        console.log('📊 Part 1: Collection Information\n');
+        
+        // Create test data
+        await TestModel.create([
+            { name: 'Document 1', value: 100, category: 'A' },
+            { name: 'Document 2', value: 200, category: 'B' },
+            { name: 'Document 3', value: 300, category: 'A' }
+        ]);
+        
+        await TempModel.create([
+            { name: 'Temp Doc 1', value: 10, category: 'X' },
+            { name: 'Temp Doc 2', value: 20, category: 'Y' }
+        ]);
+        
+        // List all collections
+        console.log('1. List all collections:');
+        const collections = await db.listCollections().toArray();
+        collections.forEach(col => {
+            console.log(`   - ${col.name} (type: ${col.type})`);
+        });
+        
+        // Get collection statistics
+        console.log('\n2. Collection statistics:');
+        const stats = await db.collection('test_collection').stats();
+        console.log(`   test_collection stats:`);
+        console.log(`     - Document count: ${stats.count}`);
+        console.log(`     - Size: ${stats.size} bytes`);
+        console.log(`     - Average document size: ${stats.avgObjSize} bytes`);
+        
+        // Collection indexes
+        console.log('\n3. Collection indexes:');
+        const indexes = await db.collection('test_collection').indexes();
+        console.log(`   test_collection indexes:`);
+        indexes.forEach(idx => {
+            console.log(`     - ${idx.name}: ${JSON.stringify(idx.key)}`);
+        });
+        
+        // ============================================
+        // PART 2: Renaming Collections
+        // ============================================
+        
+        console.log('\n📝 Part 2: Renaming Collections\n');
+        
+        console.log('1. Before rename:');
+        let beforeDocs = await TestModel.find();
+        console.log(`   test_collection has ${beforeDocs.length} documents`);
+        
+        // Rename collection
+        console.log('\n2. Renaming collection:');
+        try {
+            await db.collection('test_collection').rename('test_collection_renamed');
+            console.log('   ✅ Renamed: test_collection → test_collection_renamed');
+            
+            // IMPORTANT: The model still points to old collection name!
+            console.log('\n3. Model behavior after rename:');
+            try {
+                const afterRenameDocs = await TestModel.find();
+                console.log(`   ❌ TestModel.find() returned: ${afterRenameDocs.length} documents`);
+            } catch (err) {
+                console.log(`   ❌ TestModel query might fail or return empty`);
+            }
+            
+            // Access with new collection name
+            console.log('\n4. Accessing renamed collection directly:');
+            const renamedCollectionDocs = await db.collection('test_collection_renamed').find({}).toArray();
+            console.log(`   ✅ Direct access found ${renamedCollectionDocs.length} documents`);
+            console.log('   Documents are preserved in renamed collection!');
+            
+            // Create new model for renamed collection
+            const RenamedModel = mongoose.model('RenamedModel', testSchema, 'test_collection_renamed');
+            const renamedModelDocs = await RenamedModel.find();
+            console.log(`\n5. New model with correct collection name found ${renamedModelDocs.length} documents`);
+            
+        } catch (error) {
+            console.log(`   ❌ Rename failed: ${error.message}`);
+        }
+        
+        // ============================================
+        // PART 3: Copying Collections
+        // ============================================
+        
+        console.log('\n📋 Part 3: Copying Collections\n');
+        
+        console.log('1. Copy collection (manual process):');
+        
+        // Read all documents from source
+        const sourceDocs = await db.collection('test_collection_renamed').find({}).toArray();
+        console.log(`   Found ${sourceDocs.length} documents to copy`);
+        
+        // Insert into new collection
+        if (sourceDocs.length > 0) {
+            await db.collection('test_collection_copy').insertMany(sourceDocs);
+            console.log('   ✅ Copied to test_collection_copy');
+            
+            // Verify copy
+            const copyCount = await db.collection('test_collection_copy').countDocuments();
+            console.log(`   Verified: ${copyCount} documents in copy`);
+        }
+        
+        // ============================================
+        // PART 4: Deleting Collections
+        // ============================================
+        
+        console.log('\n🗑️ Part 4: Deleting Collections\n');
+        
+        console.log('1. Collections before deletion:');
+        let currentCollections = await db.listCollections().toArray();
+        console.log(`   Total collections: ${currentCollections.length}`);
+        
+        // Show what happens to documents
+        console.log('\n2. Document count before deletion:');
+        const tempCount = await TempModel.countDocuments();
+        console.log(`   temp_collection has ${tempCount} documents`);
+        
+        // Drop collection
+        console.log('\n3. Dropping collection:');
+        await db.collection('temp_collection').drop();
+        console.log('   ✅ Dropped temp_collection');
+        
+        console.log('\n4. What happens to the documents?');
+        console.log('   ⚠️  ALL DOCUMENTS IN THE COLLECTION ARE PERMANENTLY DELETED!');
+        
+        try {
+            const afterDropCount = await TempModel.countDocuments();
+            console.log(`   Document count after drop: ${afterDropCount}`);
+        } catch (error) {
+            console.log(`   ❌ Collection no longer exists: ${error.message}`);
+        }
+        
+        // ============================================
+        // PART 5: Safe Collection Operations
+        // ============================================
+        
+        console.log('\n🛡️ Part 5: Safe Collection Operations\n');
+        
+        // Check if collection exists before operations
+        console.log('1. Check collection existence:');
+        async function collectionExists(name) {
+            const collections = await db.listCollections({ name: name }).toArray();
+            return collections.length > 0;
+        }
+        
+        const exists = await collectionExists('test_collection_copy');
+        console.log(`   test_collection_copy exists: ${exists}`);
+        
+        // Safe drop with backup
+        console.log('\n2. Safe drop with backup:');
+        async function safeDropCollection(collectionName) {
+            const backupName = `${collectionName}_backup_${Date.now()}`;
+            
+            // Check if collection exists
+            if (!(await collectionExists(collectionName))) {
+                console.log(`   Collection ${collectionName} doesn't exist`);
+                return false;
+            }
+            
+            // Create backup
+            const docs = await db.collection(collectionName).find({}).toArray();
+            if (docs.length > 0) {
+                await db.collection(backupName).insertMany(docs);
+                console.log(`   📦 Backed up ${docs.length} documents to ${backupName}`);
+            }
+            
+            // Now safe to drop
+            await db.collection(collectionName).drop();
+            console.log(`   🗑️ Dropped ${collectionName}`);
+            
+            return true;
+        }
+        
+        await safeDropCollection('test_collection_copy');
+        
+        // ============================================
+        // PART 6: Collection Management Best Practices
+        // ============================================
+        
+        console.log('\n📚 Part 6: Best Practices and Summary\n');
+        
+        // Show final state
+        console.log('1. Final collection state:');
+        const finalCollections = await db.listCollections().toArray();
+        console.log('   Remaining collections:');
+        finalCollections.forEach(col => {
+            console.log(`     - ${col.name}`);
+        });
+        
+        // Clean up
+        console.log('\n2. Cleanup remaining test collections:');
+        for (const col of finalCollections) {
+            if (col.name.includes('test_collection') || col.name.includes('temp_collection')) {
+                await db.collection(col.name).drop();
+                console.log(`   Dropped: ${col.name}`);
+            }
+        }
+        
+        console.log('\n⚠️  CRITICAL WARNINGS:');
+        console.log('================================================');
+        console.log('1. Dropping a collection PERMANENTLY DELETES ALL documents!');
+        console.log('2. There is NO UNDO for collection drops!');
+        console.log('3. Renaming collections breaks existing model references!');
+        console.log('4. Always backup important data before collection operations!');
+        console.log('5. Collection operations bypass Mongoose middleware!');
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. Collections contain documents - drop collection = lose all docs');
+        console.log('2. Rename operations require updating model references');
+        console.log('3. Use db.collection() for direct MongoDB operations');
+        console.log('4. Always check collection existence before operations');
+        console.log('5. Implement backup strategies for critical data');
+        console.log('6. Collection operations are immediate and permanent');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateCollectionOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+// Add warning prompt
+console.log('⚠️  WARNING: This lab will create, rename, and DELETE collections!');
+console.log('Make sure you\'re using a test database.\n');
+
+runLab();
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                                                                                                                            
+                                                                                          
+
+
+
+                                                                                          
+    
+    
+    
