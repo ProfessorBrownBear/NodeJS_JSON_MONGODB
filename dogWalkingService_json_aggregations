@@ -1,0 +1,647 @@
+Node.js example with Dogs and Dog Walkers collections, showing how $lookup and $unwind work in this real-world scenario.
+Schema Design Explanation
+
+In this dog walking service example, I've created three collections to model a many-to-many relationship:
+1. Dogs Collection
+
+    Contains dog information (name, breed, size, temperament, owner details)
+    Each dog can have multiple walkers
+
+2. DogWalkers Collection
+
+    Contains walker information (name, experience, availability, rates)
+    Each walker can walk multiple dogs
+
+3. WalkingSchedules Collection (Join Table)
+
+    Links dogs and walkers together
+    Contains schedule details (days, times, duration)
+    Allows the same dog to have different walkers on different days
+
+How $lookup and $unwind Apply
+  
+1. Basic $lookup Creates Arrays
+
+When you use $lookup to join collections:
+
+javascript
+
+{
+    $lookup: {
+        from: 'walkingschedules',
+        localField: '_id',
+        foreignField: 'dog',
+        as: 'schedules'  // This is ALWAYS an array
+    }
+}
+
+Result structure:
+
+{
+    name: "Bella",
+    breed: "Chihuahua",
+    schedules: [  // Array of schedules
+        { walker: ObjectId(...), walkDays: ['Monday', 'Wednesday'], ... },
+        { walker: ObjectId(...), walkDays: ['Saturday'], ... }
+    ]
+}
+
+2. $unwind Flattens Arrays into Documents
+
+The $unwind stage converts each array element into a separate document:
+
+Before $unwind:
+
+javascript
+
+{
+    walkTime: "9:00 AM",
+    dogInfo: [{  // Array with one element
+        name: "Bella",
+        breed: "Chihuahua"
+    }]
+}
+
+After $unwind:
+
+javascript
+
+{
+    walkTime: "9:00 AM",
+    dogInfo: {  // Now it's an object, not an array
+        name: "Bella",
+        breed: "Chihuahua"
+    }
+}
+
+3. Key Use Cases in This Example
+
+Finding Walker Assignments (Example 2):
+
+    Join schedules → dogs → walkers
+    Use $unwind to create a flat report showing which walker walks which dog
+
+Workload Analysis (Example 3):
+
+    Use sub-pipeline $lookup to filter only active schedules
+    Keep results as arrays to count dogs per walker
+    Calculate statistics using array operators
+
+Finding Unassigned Dogs (Example 4):
+
+    Use $lookup to find dogs with no schedules
+    Check for empty arrays to identify dogs needing walkers
+
+Why This Design?
+
+    Flexibility: Dogs can have multiple walkers (primary and backup)
+    Scheduling: Each relationship can have its own schedule
+    Status Tracking: Can pause/cancel individual assignments
+    Historical Data: Keep past walking relationships
+
+This demonstrates real-world MongoDB patterns where $lookup and $unwind help transform document-based data into relational-style reports for analysis and display.
+
+// dog-walking-service.js
+// MongoDB Aggregation Example with Dogs and Dog Walkers
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb://user1:Orange11!a@cluster0.a1cvf3x.mongodb.net/dogWalkingDB';
+
+mongoose.connect(MONGODB_URI);
+
+// Connection event handlers
+mongoose.connection.on('connected', () => {
+    console.log('✅ Connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB connection error:', err);
+});
+
+// ============================================
+// SCHEMAS
+// ============================================
+
+// Dog Walker Schema
+const dogWalkerSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true },
+    phone: { type: String, required: true },
+    experience: { type: String, enum: ['beginner', 'intermediate', 'expert'] },
+    availability: [String], // ['Monday', 'Tuesday', etc.]
+    maxDogs: { type: Number, default: 5 },
+    hourlyRate: { type: Number, required: true }
+});
+
+// Dog Schema
+const dogSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    breed: { type: String, required: true },
+    age: { type: Number, required: true },
+    size: { type: String, enum: ['small', 'medium', 'large'] },
+    temperament: { type: String, enum: ['calm', 'energetic', 'aggressive', 'friendly'] },
+    owner: {
+        name: String,
+        phone: String
+    },
+    specialNeeds: String
+});
+
+// Walking Schedule Schema (Join Table)
+// This models the many-to-many relationship between dogs and walkers
+const walkingScheduleSchema = new mongoose.Schema({
+    walker: { type: mongoose.Schema.Types.ObjectId, ref: 'DogWalker', required: true },
+    dog: { type: mongoose.Schema.Types.ObjectId, ref: 'Dog', required: true },
+    walkDays: [String], // ['Monday', 'Wednesday', 'Friday']
+    walkTime: { type: String, required: true }, // '9:00 AM', '2:00 PM', etc.
+    duration: { type: Number, default: 30 }, // minutes
+    status: { type: String, enum: ['active', 'paused', 'cancelled'], default: 'active' },
+    startDate: { type: Date, default: Date.now },
+    notes: String
+});
+
+// Create models
+const DogWalker = mongoose.model('DogWalker', dogWalkerSchema);
+const Dog = mongoose.model('Dog', dogSchema);
+const WalkingSchedule = mongoose.model('WalkingSchedule', walkingScheduleSchema);
+
+// ============================================
+// SEED DATA
+// ============================================
+
+async function seedData() {
+    try {
+        // Clear existing data
+        await DogWalker.deleteMany({});
+        await Dog.deleteMany({});
+        await WalkingSchedule.deleteMany({});
+        
+        console.log('🗑️  Cleared existing data');
+        
+        // Create Dog Walkers
+        const walkers = await DogWalker.create([
+            {
+                name: 'Sarah Johnson',
+                email: 'sarah@dogwalks.com',
+                phone: '555-0101',
+                experience: 'expert',
+                availability: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+                maxDogs: 6,
+                hourlyRate: 25
+            },
+            {
+                name: 'Mike Chen',
+                email: 'mike@dogwalks.com',
+                phone: '555-0102',
+                experience: 'intermediate',
+                availability: ['Monday', 'Wednesday', 'Friday', 'Saturday', 'Sunday'],
+                maxDogs: 4,
+                hourlyRate: 20
+            },
+            {
+                name: 'Emma Wilson',
+                email: 'emma@dogwalks.com',
+                phone: '555-0103',
+                experience: 'beginner',
+                availability: ['Tuesday', 'Thursday', 'Saturday'],
+                maxDogs: 3,
+                hourlyRate: 15
+            }
+        ]);
+        
+        console.log('👥 Created 3 dog walkers');
+        
+        // Create Dogs
+        const dogs = await Dog.create([
+            // Small dogs
+            { name: 'Bella', breed: 'Chihuahua', age: 3, size: 'small', temperament: 'friendly', owner: { name: 'John Smith', phone: '555-1001' } },
+            { name: 'Max', breed: 'Yorkshire Terrier', age: 5, size: 'small', temperament: 'energetic', owner: { name: 'Lisa Brown', phone: '555-1002' } },
+            { name: 'Charlie', breed: 'Pomeranian', age: 2, size: 'small', temperament: 'calm', owner: { name: 'David Lee', phone: '555-1003' } },
+            { name: 'Daisy', breed: 'French Bulldog', age: 4, size: 'small', temperament: 'friendly', owner: { name: 'Amy Chen', phone: '555-1004' } },
+            { name: 'Rocky', breed: 'Dachshund', age: 6, size: 'small', temperament: 'energetic', owner: { name: 'Tom Wilson', phone: '555-1005' } },
+            
+            // Medium dogs
+            { name: 'Lucy', breed: 'Beagle', age: 3, size: 'medium', temperament: 'friendly', owner: { name: 'Sarah Davis', phone: '555-1006' } },
+            { name: 'Cooper', breed: 'Cocker Spaniel', age: 4, size: 'medium', temperament: 'calm', owner: { name: 'Mark Johnson', phone: '555-1007' } },
+            { name: 'Bailey', breed: 'Border Collie', age: 2, size: 'medium', temperament: 'energetic', owner: { name: 'Emma White', phone: '555-1008' }, specialNeeds: 'Needs lots of exercise' },
+            { name: 'Buddy', breed: 'Bulldog', age: 5, size: 'medium', temperament: 'calm', owner: { name: 'Chris Martin', phone: '555-1009' } },
+            { name: 'Molly', breed: 'Australian Shepherd', age: 3, size: 'medium', temperament: 'energetic', owner: { name: 'Rachel Green', phone: '555-1010' } },
+            
+            // Large dogs
+            { name: 'Duke', breed: 'German Shepherd', age: 4, size: 'large', temperament: 'calm', owner: { name: 'Michael Brown', phone: '555-1011' }, specialNeeds: 'Trained service dog' },
+            { name: 'Bear', breed: 'Golden Retriever', age: 6, size: 'large', temperament: 'friendly', owner: { name: 'Jennifer Lee', phone: '555-1012' } },
+            { name: 'Zeus', breed: 'Great Dane', age: 3, size: 'large', temperament: 'calm', owner: { name: 'Robert Taylor', phone: '555-1013' } },
+            { name: 'Thor', breed: 'Husky', age: 2, size: 'large', temperament: 'energetic', owner: { name: 'Amanda White', phone: '555-1014' } },
+            { name: 'Rex', breed: 'Rottweiler', age: 5, size: 'large', temperament: 'aggressive', owner: { name: 'James Wilson', phone: '555-1015' }, specialNeeds: 'Requires experienced handler' }
+        ]);
+        
+        console.log('🐕 Created 15 dogs');
+        
+        // Create Walking Schedules
+        // Sarah (expert) handles more dogs including difficult ones
+        const schedules = await WalkingSchedule.create([
+            // Sarah's dogs (6 dogs)
+            { walker: walkers[0]._id, dog: dogs[0]._id, walkDays: ['Monday', 'Wednesday', 'Friday'], walkTime: '9:00 AM', duration: 30 },
+            { walker: walkers[0]._id, dog: dogs[3]._id, walkDays: ['Monday', 'Wednesday', 'Friday'], walkTime: '9:00 AM', duration: 30 },
+            { walker: walkers[0]._id, dog: dogs[7]._id, walkDays: ['Monday', 'Tuesday', 'Thursday'], walkTime: '10:00 AM', duration: 45, notes: 'High energy - needs longer walk' },
+            { walker: walkers[0]._id, dog: dogs[10]._id, walkDays: ['Tuesday', 'Thursday'], walkTime: '2:00 PM', duration: 45 },
+            { walker: walkers[0]._id, dog: dogs[13]._id, walkDays: ['Monday', 'Wednesday', 'Friday'], walkTime: '3:00 PM', duration: 60, notes: 'Energetic husky - full hour needed' },
+            { walker: walkers[0]._id, dog: dogs[14]._id, walkDays: ['Tuesday', 'Thursday'], walkTime: '4:00 PM', duration: 30, notes: 'Experienced handler required' },
+            
+            // Mike's dogs (4 dogs)
+            { walker: walkers[1]._id, dog: dogs[1]._id, walkDays: ['Monday', 'Friday'], walkTime: '11:00 AM', duration: 30 },
+            { walker: walkers[1]._id, dog: dogs[5]._id, walkDays: ['Wednesday', 'Saturday'], walkTime: '9:00 AM', duration: 30 },
+            { walker: walkers[1]._id, dog: dogs[8]._id, walkDays: ['Monday', 'Wednesday', 'Friday'], walkTime: '2:00 PM', duration: 30 },
+            { walker: walkers[1]._id, dog: dogs[11]._id, walkDays: ['Saturday', 'Sunday'], walkTime: '10:00 AM', duration: 45 },
+            
+            // Emma's dogs (3 dogs - smaller, calmer dogs as she's a beginner)
+            { walker: walkers[2]._id, dog: dogs[2]._id, walkDays: ['Tuesday', 'Thursday'], walkTime: '10:00 AM', duration: 30 },
+            { walker: walkers[2]._id, dog: dogs[4]._id, walkDays: ['Saturday'], walkTime: '9:00 AM', duration: 30 },
+            { walker: walkers[2]._id, dog: dogs[6]._id, walkDays: ['Tuesday', 'Thursday', 'Saturday'], walkTime: '11:00 AM', duration: 30 },
+            
+            // Some dogs with multiple walkers (backup arrangements)
+            { walker: walkers[1]._id, dog: dogs[0]._id, walkDays: ['Saturday'], walkTime: '9:00 AM', duration: 30, notes: 'Weekend backup for Sarah' },
+            { walker: walkers[2]._id, dog: dogs[3]._id, walkDays: ['Saturday'], walkTime: '2:00 PM', duration: 30, status: 'paused', notes: 'On hold - owner traveling' }
+        ]);
+        
+        console.log('📅 Created walking schedules');
+        console.log('✅ Seed data created successfully!\n');
+        
+    } catch (error) {
+        console.error('❌ Error seeding data:', error);
+    }
+}
+
+// ============================================
+// AGGREGATION EXAMPLES
+// ============================================
+
+// Example 1: Basic $lookup - Find all dogs and their walkers
+async function example1_basicLookup() {
+    console.log('\n' + '='.repeat(80));
+    console.log('Example 1: Basic $lookup - Dogs and Their Walkers');
+    console.log('='.repeat(80) + '\n');
+    
+    const results = await Dog.aggregate([
+        // Join with walking schedules
+        {
+            $lookup: {
+                from: 'walkingschedules',  // Collection name (lowercase)
+                localField: '_id',         // Dog's _id
+                foreignField: 'dog',       // Reference in walkingschedules
+                as: 'schedules'            // Output array field
+            }
+        },
+        {
+            $limit: 3  // Show first 3 dogs
+        }
+    ]);
+    
+    console.log('🔍 Raw result structure (first dog):');
+    console.log(JSON.stringify(results[0], null, 2));
+    
+    console.log('\n📊 Analysis:');
+    console.log('- $lookup creates an array field "schedules"');
+    console.log('- Each dog now has an array of their walking schedules');
+    console.log('- Dogs without schedules will have an empty array');
+}
+
+// Example 2: $lookup with $unwind - Flatten the results
+async function example2_lookupWithUnwind() {
+    console.log('\n' + '='.repeat(80));
+    console.log('Example 2: $lookup with $unwind - Creating a Flat Schedule Report');
+    console.log('='.repeat(80) + '\n');
+    
+    const results = await WalkingSchedule.aggregate([
+        // Stage 1: Filter active schedules only
+        {
+            $match: {
+                status: 'active'
+            }
+        },
+        
+        // Stage 2: Join with dogs
+        {
+            $lookup: {
+                from: 'dogs',
+                localField: 'dog',
+                foreignField: '_id',
+                as: 'dogInfo'  // This creates an array
+            }
+        },
+        
+        // Stage 3: Unwind dog array (convert to object)
+        {
+            $unwind: '$dogInfo'  // Now dogInfo is an object, not array
+        },
+        
+        // Stage 4: Join with walkers
+        {
+            $lookup: {
+                from: 'dogwalkers',
+                localField: 'walker',
+                foreignField: '_id',
+                as: 'walkerInfo'  // This creates an array
+            }
+        },
+        
+        // Stage 5: Unwind walker array
+        {
+            $unwind: '$walkerInfo'  // Now walkerInfo is an object
+        },
+        
+        // Stage 6: Project the fields we want
+      https://coda.io/@peter-sigurdson/the-project-stage-in-mongodb-aggregation-is-like-the-select-stat
+      
+        {
+            $project: {
+                _id: 0,
+                dogName: '$dogInfo.name',
+                dogBreed: '$dogInfo.breed',
+                dogSize: '$dogInfo.size',
+                walkerName: '$walkerInfo.name',
+                walkDays: 1,
+                walkTime: 1,
+                duration: 1
+            }
+        },
+        
+        // Stage 7: Sort by walker name, then dog name
+        {
+            $sort: {
+                walkerName: 1,
+                dogName: 1
+            }
+        }
+    ]);
+    
+    console.log('📅 Active Walking Schedule:');
+    console.log('-'.repeat(100));
+    console.log('Walker Name      | Dog Name    | Breed              | Size   | Days                     | Time     | Duration');
+    console.log('-'.repeat(100));
+    
+    results.forEach(schedule => {
+        console.log(
+            `${schedule.walkerName.padEnd(16)} | ` +
+            `${schedule.dogName.padEnd(11)} | ` +
+            `${schedule.dogBreed.padEnd(18)} | ` +
+            `${schedule.dogSize.padEnd(6)} | ` +
+            `${schedule.walkDays.join(', ').padEnd(24)} | ` +
+            `${schedule.walkTime.padEnd(8)} | ` +
+            `${schedule.duration} min`
+        );
+    });
+    
+    console.log('\n💡 Key Points:');
+    console.log('- Before $unwind: dogInfo and walkerInfo were arrays');
+    console.log('- After $unwind: They become objects, allowing direct field access');
+    console.log('- This creates a "flat" table-like structure from nested documents');
+}
+
+// Example 3: Complex aggregation - Walker workload analysis
+async function example3_walkerWorkload() {
+    console.log('\n' + '='.repeat(80));
+    console.log('Example 3: Complex Aggregation - Walker Workload Analysis');
+    console.log('='.repeat(80) + '\n');
+    
+    const results = await DogWalker.aggregate([
+        // Stage 1: Join with schedules
+        {
+            $lookup: {
+                from: 'walkingschedules',
+                let: { walkerId: '$_id' },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: ['$walker', '$$walkerId'] },
+                                    { $eq: ['$status', 'active'] }
+                                ]
+                            }
+                        }
+                    },
+                    // Nested lookup to get dog details
+                    {
+                        $lookup: {
+                            from: 'dogs',
+                            localField: 'dog',
+                            foreignField: '_id',
+                            as: 'dogDetails'
+                        }
+                    },
+                    {
+                        $unwind: '$dogDetails'
+                    }
+                ],
+                as: 'activeSchedules'
+            }
+        },
+        
+        // Stage 2: Calculate statistics
+        {
+            $addFields: {
+                totalDogs: { $size: '$activeSchedules' },
+                capacityUsed: {
+                    $multiply: [
+                        { $divide: [{ $size: '$activeSchedules' }, '$maxDogs'] },
+                        100
+                    ]
+                },
+                dogsBySize: {
+                    small: {
+                        $size: {
+                            $filter: {
+                                input: '$activeSchedules',
+                                as: 'schedule',
+                                cond: { $eq: ['$$schedule.dogDetails.size', 'small'] }
+                            }
+                        }
+                    },
+                    medium: {
+                        $size: {
+                            $filter: {
+                                input: '$activeSchedules',
+                                as: 'schedule',
+                                cond: { $eq: ['$$schedule.dogDetails.size', 'medium'] }
+                            }
+                        }
+                    },
+                    large: {
+                        $size: {
+                            $filter: {
+                                input: '$activeSchedules',
+                                as: 'schedule',
+                                cond: { $eq: ['$$schedule.dogDetails.size', 'large'] }
+                            }
+                        }
+                    }
+                },
+                totalWalkMinutesPerWeek: {
+                    $sum: {
+                        $map: {
+                            input: '$activeSchedules',
+                            as: 'schedule',
+                            in: {
+                                $multiply: [
+                                    '$$schedule.duration',
+                                    { $size: '$$schedule.walkDays' }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        
+        // Stage 3: Project final output
+        {
+            $project: {
+                name: 1,
+                experience: 1,
+                hourlyRate: 1,
+                maxDogs: 1,
+                totalDogs: 1,
+                capacityUsed: { $round: ['$capacityUsed', 1] },
+                dogsBySize: 1,
+                totalWalkMinutesPerWeek: 1,
+                estimatedWeeklyEarnings: {
+                    $multiply: [
+                        { $divide: ['$totalWalkMinutesPerWeek', 60] },
+                        '$hourlyRate'
+                    ]
+                }
+            }
+        },
+        
+        // Stage 4: Sort by total dogs (descending)
+        {
+            $sort: { totalDogs: -1 }
+        }
+    ]);
+    
+    console.log('📊 Walker Workload Analysis:');
+    console.log('='.repeat(80));
+    
+    results.forEach(walker => {
+        console.log(`\n👤 ${walker.name} (${walker.experience})`);
+        console.log(`   Hourly Rate: $${walker.hourlyRate}`);
+        console.log(`   Capacity: ${walker.totalDogs}/${walker.maxDogs} dogs (${walker.capacityUsed}% full)`);
+        console.log(`   Dogs by Size: Small: ${walker.dogsBySize.small}, Medium: ${walker.dogsBySize.medium}, Large: ${walker.dogsBySize.large}`);
+        console.log(`   Weekly Walk Time: ${walker.totalWalkMinutesPerWeek} minutes`);
+        console.log(`   Estimated Weekly Earnings: $${walker.estimatedWeeklyEarnings.toFixed(2)}`);
+    });
+    
+    console.log('\n💡 Advanced Concepts Demonstrated:');
+    console.log('- Sub-pipeline in $lookup for complex join conditions');
+    console.log('- Nested $lookup within a $lookup pipeline');
+    console.log('- $filter to count documents by criteria');
+    console.log('- $map to transform arrays and calculate totals');
+    console.log('- Business metrics calculation in aggregation pipeline');
+}
+
+// Example 4: Finding dogs without walkers
+async function example4_dogsWithoutWalkers() {
+    console.log('\n' + '='.repeat(80));
+    console.log('Example 4: Dogs Without Active Walkers');
+    console.log('='.repeat(80) + '\n');
+    
+    const results = await Dog.aggregate([
+        // Left join with schedules
+        {
+            $lookup: {
+                from: 'walkingschedules',
+                let: { dogId: '$_id' },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: ['$dog', '$$dogId'] },
+                                    { $eq: ['$status', 'active'] }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                as: 'activeSchedules'
+            }
+        },
+        
+        // Filter dogs with no active schedules
+        {
+            $match: {
+                activeSchedules: { $size: 0 }
+            }
+        },
+        
+        // Project dog details
+        {
+            $project: {
+                name: 1,
+                breed: 1,
+                size: 1,
+                temperament: 1,
+                owner: 1,
+                specialNeeds: 1
+            }
+        }
+    ]);
+    
+    if (results.length === 0) {
+        console.log('✅ All dogs have active walkers!');
+    } else {
+        console.log('🚨 Dogs needing walkers:');
+        results.forEach(dog => {
+            console.log(`\n- ${dog.name} (${dog.breed})`);
+            console.log(`  Size: ${dog.size}, Temperament: ${dog.temperament}`);
+            console.log(`  Owner: ${dog.owner.name} (${dog.owner.phone})`);
+            if (dog.specialNeeds) {
+                console.log(`  ⚠️  Special Needs: ${dog.specialNeeds}`);
+            }
+        });
+    }
+    
+    console.log('\n💡 This demonstrates:');
+    console.log('- Using $lookup to find missing relationships');
+    console.log('- $match with $size: 0 to find empty arrays');
+    console.log('- Useful for finding unassigned resources');
+}
+
+// Main function
+async function main() {
+    try {
+        // Wait for connection
+        await new Promise(resolve => {
+            if (mongoose.connection.readyState === 1) {
+                resolve();
+            } else {
+                mongoose.connection.once('open', resolve);
+            }
+        });
+        
+        console.log('\n🐕 Dog Walking Service - MongoDB Aggregation Examples\n');
+        
+        // Seed the data
+        await seedData();
+        
+        // Run examples
+        await example1_basicLookup();
+        await example2_lookupWithUnwind();
+        await example3_walkerWorkload();
+        await example4_dogsWithoutWalkers();
+        
+        console.log('\n✅ All examples completed!');
+        
+    } catch (error) {
+        console.error('❌ Error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+// Run the application
+main();      
