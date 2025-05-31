@@ -1,0 +1,273 @@
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+###     Lab Example 5: Collection Management - Renaming and Deleting Collections
+                                                                                                                                                                                                                                                                                                                                                                                                                                    
+// lab5-collection-management.js
+// Managing collections - renaming, deleting, and understanding impacts
+
+const mongoose = require('mongoose');
+
+// MongoDB connection
+const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+
+mongoose.connect(MONGODB_URI);
+
+console.log('🗂️ Lab 5: Collection Management - Renaming and Deleting Collections\n');
+
+// Define test schemas
+const testSchema = new mongoose.Schema({
+    name: String,
+    value: Number,
+    category: String,
+    createdAt: { type: Date, default: Date.now }
+});
+
+// Create models with explicit collection names
+const TestModel = mongoose.model('TestModel', testSchema, 'test_collection');
+const TempModel = mongoose.model('TempModel', testSchema, 'temp_collection');
+
+async function demonstrateCollectionOperations() {
+    try {
+        // Get direct access to MongoDB native driver
+        const db = mongoose.connection.db;
+        
+        console.log('🔍 Understanding MongoDB Collection Operations\n');
+        console.log('⚠️  IMPORTANT: Collection operations affect ALL documents!');
+        console.log('================================================\n');
+        
+        // ============================================
+        // PART 1: Collection Information
+        // ============================================
+        
+        console.log('📊 Part 1: Collection Information\n');
+        
+        // Create test data
+        await TestModel.create([
+            { name: 'Document 1', value: 100, category: 'A' },
+            { name: 'Document 2', value: 200, category: 'B' },
+            { name: 'Document 3', value: 300, category: 'A' }
+        ]);
+        
+        await TempModel.create([
+            { name: 'Temp Doc 1', value: 10, category: 'X' },
+            { name: 'Temp Doc 2', value: 20, category: 'Y' }
+        ]);
+        
+        // List all collections
+        console.log('1. List all collections:');
+        const collections = await db.listCollections().toArray();
+        collections.forEach(col => {
+            console.log(`   - ${col.name} (type: ${col.type})`);
+        });
+        
+        // Get collection statistics
+        console.log('\n2. Collection statistics:');
+        const stats = await db.collection('test_collection').stats();
+        console.log(`   test_collection stats:`);
+        console.log(`     - Document count: ${stats.count}`);
+        console.log(`     - Size: ${stats.size} bytes`);
+        console.log(`     - Average document size: ${stats.avgObjSize} bytes`);
+        
+        // Collection indexes
+        console.log('\n3. Collection indexes:');
+        const indexes = await db.collection('test_collection').indexes();
+        console.log(`   test_collection indexes:`);
+        indexes.forEach(idx => {
+            console.log(`     - ${idx.name}: ${JSON.stringify(idx.key)}`);
+        });
+        
+        // ============================================
+        // PART 2: Renaming Collections
+        // ============================================
+        
+        console.log('\n📝 Part 2: Renaming Collections\n');
+        
+        console.log('1. Before rename:');
+        let beforeDocs = await TestModel.find();
+        console.log(`   test_collection has ${beforeDocs.length} documents`);
+        
+        // Rename collection
+        console.log('\n2. Renaming collection:');
+        try {
+            await db.collection('test_collection').rename('test_collection_renamed');
+            console.log('   ✅ Renamed: test_collection → test_collection_renamed');
+            
+            // IMPORTANT: The model still points to old collection name!
+            console.log('\n3. Model behavior after rename:');
+            try {
+                const afterRenameDocs = await TestModel.find();
+                console.log(`   ❌ TestModel.find() returned: ${afterRenameDocs.length} documents`);
+            } catch (err) {
+                console.log(`   ❌ TestModel query might fail or return empty`);
+            }
+            
+            // Access with new collection name
+            console.log('\n4. Accessing renamed collection directly:');
+            const renamedCollectionDocs = await db.collection('test_collection_renamed').find({}).toArray();
+            console.log(`   ✅ Direct access found ${renamedCollectionDocs.length} documents`);
+            console.log('   Documents are preserved in renamed collection!');
+            
+            // Create new model for renamed collection
+            const RenamedModel = mongoose.model('RenamedModel', testSchema, 'test_collection_renamed');
+            const renamedModelDocs = await RenamedModel.find();
+            console.log(`\n5. New model with correct collection name found ${renamedModelDocs.length} documents`);
+            
+        } catch (error) {
+            console.log(`   ❌ Rename failed: ${error.message}`);
+        }
+        
+        // ============================================
+        // PART 3: Copying Collections
+        // ============================================
+        
+        console.log('\n📋 Part 3: Copying Collections\n');
+        
+        console.log('1. Copy collection (manual process):');
+        
+        // Read all documents from source
+        const sourceDocs = await db.collection('test_collection_renamed').find({}).toArray();
+        console.log(`   Found ${sourceDocs.length} documents to copy`);
+        
+        // Insert into new collection
+        if (sourceDocs.length > 0) {
+            await db.collection('test_collection_copy').insertMany(sourceDocs);
+            console.log('   ✅ Copied to test_collection_copy');
+            
+            // Verify copy
+            const copyCount = await db.collection('test_collection_copy').countDocuments();
+            console.log(`   Verified: ${copyCount} documents in copy`);
+        }
+        
+        // ============================================
+        // PART 4: Deleting Collections
+        // ============================================
+        
+        console.log('\n🗑️ Part 4: Deleting Collections\n');
+        
+        console.log('1. Collections before deletion:');
+        let currentCollections = await db.listCollections().toArray();
+        console.log(`   Total collections: ${currentCollections.length}`);
+        
+        // Show what happens to documents
+        console.log('\n2. Document count before deletion:');
+        const tempCount = await TempModel.countDocuments();
+        console.log(`   temp_collection has ${tempCount} documents`);
+        
+        // Drop collection
+        console.log('\n3. Dropping collection:');
+        await db.collection('temp_collection').drop();
+        console.log('   ✅ Dropped temp_collection');
+        
+        console.log('\n4. What happens to the documents?');
+        console.log('   ⚠️  ALL DOCUMENTS IN THE COLLECTION ARE PERMANENTLY DELETED!');
+        
+        try {
+            const afterDropCount = await TempModel.countDocuments();
+            console.log(`   Document count after drop: ${afterDropCount}`);
+        } catch (error) {
+            console.log(`   ❌ Collection no longer exists: ${error.message}`);
+        }
+        
+        // ============================================
+        // PART 5: Safe Collection Operations
+        // ============================================
+        
+        console.log('\n🛡️ Part 5: Safe Collection Operations\n');
+        
+        // Check if collection exists before operations
+        console.log('1. Check collection existence:');
+        async function collectionExists(name) {
+            const collections = await db.listCollections({ name: name }).toArray();
+            return collections.length > 0;
+        }
+        
+        const exists = await collectionExists('test_collection_copy');
+        console.log(`   test_collection_copy exists: ${exists}`);
+        
+        // Safe drop with backup
+        console.log('\n2. Safe drop with backup:');
+        async function safeDropCollection(collectionName) {
+            const backupName = `${collectionName}_backup_${Date.now()}`;
+            
+            // Check if collection exists
+            if (!(await collectionExists(collectionName))) {
+                console.log(`   Collection ${collectionName} doesn't exist`);
+                return false;
+            }
+            
+            // Create backup
+            const docs = await db.collection(collectionName).find({}).toArray();
+            if (docs.length > 0) {
+                await db.collection(backupName).insertMany(docs);
+                console.log(`   📦 Backed up ${docs.length} documents to ${backupName}`);
+            }
+            
+            // Now safe to drop
+            await db.collection(collectionName).drop();
+            console.log(`   🗑️ Dropped ${collectionName}`);
+            
+            return true;
+        }
+        
+        await safeDropCollection('test_collection_copy');
+        
+        // ============================================
+        // PART 6: Collection Management Best Practices
+        // ============================================
+        
+        console.log('\n📚 Part 6: Best Practices and Summary\n');
+        
+        // Show final state
+        console.log('1. Final collection state:');
+        const finalCollections = await db.listCollections().toArray();
+        console.log('   Remaining collections:');
+        finalCollections.forEach(col => {
+            console.log(`     - ${col.name}`);
+        });
+        
+        // Clean up
+        console.log('\n2. Cleanup remaining test collections:');
+        for (const col of finalCollections) {
+            if (col.name.includes('test_collection') || col.name.includes('temp_collection')) {
+                await db.collection(col.name).drop();
+                console.log(`   Dropped: ${col.name}`);
+            }
+        }
+        
+        console.log('\n⚠️  CRITICAL WARNINGS:');
+        console.log('================================================');
+        console.log('1. Dropping a collection PERMANENTLY DELETES ALL documents!');
+        console.log('2. There is NO UNDO for collection drops!');
+        console.log('3. Renaming collections breaks existing model references!');
+        console.log('4. Always backup important data before collection operations!');
+        console.log('5. Collection operations bypass Mongoose middleware!');
+        
+        console.log('\n💡 Key Learning Points:');
+        console.log('1. Collections contain documents - drop collection = lose all docs');
+        console.log('2. Rename operations require updating model references');
+        console.log('3. Use db.collection() for direct MongoDB operations');
+        console.log('4. Always check collection existence before operations');
+        console.log('5. Implement backup strategies for critical data');
+        console.log('6. Collection operations are immediate and permanent');
+        
+    } catch (error) {
+        console.error('❌ Error:', error.message);
+    }
+}
+
+// Run the demonstration
+async function runLab() {
+    try {
+        await demonstrateCollectionOperations();
+    } catch (error) {
+        console.error('Fatal error:', error);
+    } finally {
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
+
+// Add warning prompt
+console.log('⚠️  WARNING: This lab will create, rename, and DELETE collections!');
+console.log('Make sure you\'re using a test database.\n');
+
+runLab();
