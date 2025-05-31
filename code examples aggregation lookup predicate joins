@@ -1,24 +1,202 @@
-Lab Example 1: Basic $lookup - Find All Enrollments with Student Details
+How MongoDB's `$lookup` operator works for joining collections and how it interacts with `$unwind`, in this code:
 
-// lab1-basic-lookup.js
-// Basic $lookup - Join enrollments with student details
+## How `$lookup` Works
 
+The `$lookup` operator performs a left outer join between two collections in MongoDB. Here's how it works:
+
+### Basic `$lookup` Structure
+
+```javascript
+{
+    $lookup: {
+        from: 'students',        // Collection to join with
+        localField: 'student',   // Field from current collection
+        foreignField: '_id',     // Field from the "from" collection
+        as: 'studentDetails'     // Name of output array field
+    }
+}
+```
+
+**Key Points:**
+1. `$lookup` **always returns an array**, even for 1:1 relationships
+2. It's similar to a SQL LEFT JOIN - documents without matches still appear
+3. The "from" field uses the actual collection name (lowercase, plural by convention)
+
+### Example from Lab 1:
+```javascript
+// Starting with enrollments collection
+await Enrollment.aggregate([
+    {
+        $lookup: {
+            from: 'students',
+            localField: 'student',      // student field in enrollments
+            foreignField: '_id',        // _id field in students
+            as: 'studentDetails'        // creates array field
+        }
+    }
+]);
+
+// Result structure:
+{
+    _id: ObjectId("..."),
+    student: ObjectId("..."),
+    course: ObjectId("..."),
+    semester: "Fall 2024",
+    grade: "A",
+    studentDetails: [  // Always an array!
+        {
+            _id: ObjectId("..."),
+            studentId: "S10001",
+            name: "John Doe",
+            email: "john@college.edu",
+            program: "Computer Science"
+        }
+    ]
+}
+```
+
+## How `$lookup` Works with `$unwind`
+
+Since `$lookup` returns an array, `$unwind` is often used to "flatten" the results, converting array fields into individual documents.
+
+### The `$unwind` Process:
+
+```javascript
+// Before $unwind - studentInfo is an array
+{
+    semester: "Fall 2024",
+    grade: "A",
+    studentInfo: [{
+        name: "John Doe",
+        studentId: "S10001"
+    }]
+}
+
+// After $unwind - studentInfo is now an object
+{
+    semester: "Fall 2024",
+    grade: "A",
+    studentInfo: {
+        name: "John Doe",
+        studentId: "S10001"
+    }
+}
+```
+
+### Complete Example from Lab 2:
+
+```javascript
+await Enrollment.aggregate([
+    // Stage 1: Filter enrollments
+    {
+        $match: {
+            semester: 'Fall 2024'
+        }
+    },
+    
+    // Stage 2: Join with students (creates array)
+    {
+        $lookup: {
+            from: 'students',
+            localField: 'student',
+            foreignField: '_id',
+            as: 'studentInfo'  // This is an array
+        }
+    },
+    
+    // Stage 3: Unwind the array (convert to object)
+    {
+        $unwind: {
+            path: '$studentInfo',
+            preserveNullAndEmptyArrays: true  // Keep documents without matches
+        }
+    },
+    
+    // Stage 4: Now you can access nested fields directly
+    {
+        $project: {
+            studentName: '$studentInfo.name',  // Direct access after unwind
+            studentId: '$studentInfo.studentId',
+            semester: 1,
+            grade: 1
+        }
+    }
+]);
+
+## Advanced `$lookup` with Sub-Pipeline
+
+For complex joins with conditions, you can use a sub-pipeline inside `$lookup`:
+
+```javascript
+{
+    $lookup: {
+        from: 'enrollments',
+        let: { studentId: '$_id' },  // Variables from current collection
+        pipeline: [
+            // Sub-pipeline with its own stages
+            {
+                $match: {
+                    $expr: {
+                        $and: [
+                            { $eq: ['$student', '$$studentId'] },  // Join condition
+                            { $in: ['$grade', ['A+', 'A', 'A-']] }  // Additional filter
+                        ]
+                    }
+                }
+            }
+        ],
+        as: 'highGradeEnrollments'
+    }
+}
+```
+
+## Key Differences and Use Cases
+
+### When to Use Basic `$lookup`:
+- Simple foreign key relationships
+- When you need all matching documents
+- Performance is a priority
+
+### When to Use `$lookup` with `$unwind`:
+- Creating flat, denormalized results
+- When you expect exactly one match per document
+- Preparing data for further processing that requires object access
+
+### When to Use `$lookup` with Sub-Pipeline:
+- Complex join conditions beyond simple equality
+- Need to filter or transform joined data
+- Multiple joins in a single operation
+- Calculating aggregates on joined data
+
+## Performance Considerations
+
+1. **Basic `$lookup`** is generally faster than sub-pipeline lookups
+2. `$unwind` can increase the number of documents in the pipeline
+3. Use `preserveNullAndEmptyArrays: true` in `$unwind` to keep documents without matches
+4. Place `$match` stages early in the pipeline to reduce data volume
+
+The combination of `$lookup` and `$unwind` essentially mimics SQL JOIN behavior, transforming MongoDB's document-based structure into a more relational-style result set.
+
+
+// MongoDB Aggregation Examples with $lookup
 const mongoose = require('mongoose');
 
 // MongoDB connection
-const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
+const MONGODB_URI = 'mongodb+srv://xxx:xxx@xxx.mongodb.net/collegeDB?retryWrites=true&w=majority';
 
 // Connect to MongoDB
 mongoose.connect(MONGODB_URI);
 
-// Define schemas
-const enrollmentSchema = new mongoose.Schema({
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
-    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
-    semester: String,
-    grade: String
+// Connection event handlers
+mongoose.connection.on('connected', () => {
+    console.log('✅ Connected to MongoDB Atlas');
 });
 
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB connection error:', err);
+});
+
+// Define schemas
 const studentSchema = new mongoose.Schema({
     studentId: String,
     name: String,
@@ -26,18 +204,35 @@ const studentSchema = new mongoose.Schema({
     program: String
 });
 
-const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
-const Student = mongoose.model('Student', studentSchema);
+const courseSchema = new mongoose.Schema({
+    courseCode: String,
+    title: String,
+    credits: Number,
+    instructor: String,
+    maxStudents: { type: Number, default: 30 }
+});
 
+const enrollmentSchema = new mongoose.Schema({
+    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
+    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
+    semester: String,
+    grade: String
+});
+
+// Create models
+const Student = mongoose.model('Student', studentSchema);
+const Course = mongoose.model('Course', courseSchema);
+const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
+
+// ============================================
+// Lab 1: Basic $lookup
+// ============================================
 async function basicLookupExample() {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 Lab 1: Basic $lookup - Finding Enrollments with Student Details');
+    console.log('='.repeat(80) + '\n');
+    
     try {
-        console.log('🔍 Lab 1: Basic $lookup - Finding Enrollments with Student Details\n');
-        
-        // SQL Equivalent:
-        // SELECT e.*, s.* 
-        // FROM enrollments e
-        // JOIN students s ON e.student_id = s._id
-        
         const results = await Enrollment.aggregate([
             // Stage 1: $lookup - Join with students collection
             {
@@ -54,6 +249,11 @@ async function basicLookupExample() {
                 $limit: 3
             }
         ]);
+        
+        if (results.length === 0) {
+            console.log('No enrollments found. Make sure you have run the seed script.');
+            return;
+        }
         
         console.log('📊 Raw aggregation result (first enrollment):');
         console.log(JSON.stringify(results[0], null, 2));
@@ -76,66 +276,19 @@ async function basicLookupExample() {
         console.log('3. This is similar to a LEFT JOIN - enrollments without students still appear');
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
-    } finally {
-        await mongoose.connection.close();
-        console.log('\n✅ Connection closed');
+        console.error('❌ Error in basicLookupExample:', error.message);
     }
 }
 
-// Run the example
-basicLookupExample();
-
-
-Lab Example 2: $lookup with $unwind - Flattening the Join Results
-
-// lab2-lookup-unwind.js
-// $lookup with $unwind - Creating flat documents from joins
-
-const mongoose = require('mongoose');
-
-// MongoDB connection
-const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
-
-mongoose.connect(MONGODB_URI);
-
-// Define schemas
-const enrollmentSchema = new mongoose.Schema({
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
-    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
-    semester: String,
-    grade: String
-});
-
-const studentSchema = new mongoose.Schema({
-    studentId: String,
-    name: String,
-    email: String,
-    program: String
-});
-
-const courseSchema = new mongoose.Schema({
-    courseCode: String,
-    title: String,
-    credits: Number,
-    instructor: String
-});
-
-const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
-const Student = mongoose.model('Student', studentSchema);
-const Course = mongoose.model('Course', courseSchema);
-
+// ============================================
+// Lab 2: $lookup with $unwind
+// ============================================
 async function lookupWithUnwindExample() {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 Lab 2: $lookup with $unwind - Creating Flat Join Results');
+    console.log('='.repeat(80) + '\n');
+    
     try {
-        console.log('🔍 Lab 2: $lookup with $unwind - Creating Flat Join Results\n');
-        
-        // SQL Equivalent:
-        // SELECT s.name, s.studentId, c.courseCode, c.title, e.semester, e.grade
-        // FROM enrollments e
-        // JOIN students s ON e.student_id = s._id
-        // JOIN courses c ON e.course_id = c._id
-        // WHERE e.semester = 'Fall 2024'
-        
         const results = await Enrollment.aggregate([
             // Stage 1: Filter for Fall 2024 (like WHERE clause)
             {
@@ -156,7 +309,10 @@ async function lookupWithUnwindExample() {
             
             // Stage 3: Unwind student array (convert array to single object)
             {
-                $unwind: '$studentInfo'
+                $unwind: {
+                    path: '$studentInfo',
+                    preserveNullAndEmptyArrays: true
+                }
             },
             
             // Stage 4: Join with courses
@@ -171,7 +327,10 @@ async function lookupWithUnwindExample() {
             
             // Stage 5: Unwind course array
             {
-                $unwind: '$courseInfo'
+                $unwind: {
+                    path: '$courseInfo',
+                    preserveNullAndEmptyArrays: true
+                }
             },
             
             // Stage 6: Project (select) only the fields we want
@@ -196,6 +355,11 @@ async function lookupWithUnwindExample() {
             }
         ]);
         
+        if (results.length === 0) {
+            console.log('No Fall 2024 enrollments found.');
+            return;
+        }
+        
         console.log('📊 Fall 2024 Enrollment Report:');
         console.log('='.repeat(80));
         console.log('Student Name         | Student ID | Course    | Title                          | Grade');
@@ -203,11 +367,11 @@ async function lookupWithUnwindExample() {
         
         results.forEach(enrollment => {
             console.log(
-                `${enrollment.studentName.padEnd(20)} | ` +
-                `${enrollment.studentId.padEnd(10)} | ` +
-                `${enrollment.courseCode.padEnd(9)} | ` +
-                `${enrollment.courseTitle.padEnd(30)} | ` +
-                `${enrollment.grade}`
+                `${(enrollment.studentName || 'Unknown').padEnd(20)} | ` +
+                `${(enrollment.studentId || 'N/A').padEnd(10)} | ` +
+                `${(enrollment.courseCode || 'N/A').padEnd(9)} | ` +
+                `${(enrollment.courseTitle || 'N/A').padEnd(30)} | ` +
+                `${enrollment.grade || 'N/A'}`
             );
         });
         
@@ -222,69 +386,19 @@ async function lookupWithUnwindExample() {
         console.log('5. Pipeline stages execute in order - $match first improves performance');
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
-    } finally {
-        await mongoose.connection.close();
+        console.error('❌ Error in lookupWithUnwindExample:', error.message);
     }
 }
 
-// Run the example
-lookupWithUnwindExample();
-
-
-
-Lab Example 3: Complex Predicate Joins - Students with Specific Grades
-
-// lab3-predicate-joins.js
-// Complex predicate joins - Finding high-performing students
-
-const mongoose = require('mongoose');
-
-// MongoDB connection
-const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
-
-mongoose.connect(MONGODB_URI);
-
-// Define schemas
-const enrollmentSchema = new mongoose.Schema({
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
-    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
-    semester: String,
-    grade: String
-});
-
-const studentSchema = new mongoose.Schema({
-    studentId: String,
-    name: String,
-    email: String,
-    program: String
-});
-
-const courseSchema = new mongoose.Schema({
-    courseCode: String,
-    title: String,
-    credits: Number,
-    instructor: String
-});
-
-const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
-const Student = mongoose.model('Student', studentSchema);
-const Course = mongoose.model('Course', courseSchema);
-
+// ============================================
+// Lab 3: Complex Predicate Joins
+// ============================================
 async function predicateJoinExample() {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 Lab 3: Complex Predicate Joins - Finding Dean\'s List Students');
+    console.log('='.repeat(80) + '\n');
+    
     try {
-        console.log('🔍 Lab 3: Complex Predicate Joins - Finding Dean\'s List Students\n');
-        
-        // SQL Equivalent:
-        // SELECT s.name, s.program, COUNT(*) as course_count, 
-        //        GROUP_CONCAT(c.courseCode) as courses
-        // FROM students s
-        // JOIN enrollments e ON s._id = e.student_id
-        // JOIN courses c ON c._id = e.course_id
-        // WHERE e.grade IN ('A', 'A+', 'A-')
-        // GROUP BY s._id, s.name, s.program
-        // HAVING COUNT(*) >= 2
-        
         const results = await Student.aggregate([
             // Stage 1: Start with students (different approach - start from students)
             {
@@ -374,6 +488,11 @@ async function predicateJoinExample() {
             }
         ]);
         
+        if (results.length === 0) {
+            console.log('No students found with 2+ excellent grades (A-, A, A+).');
+            return;
+        }
+        
         console.log('🏆 Dean\'s List Report - Students with 2+ Excellent Grades (A-, A, A+)');
         console.log('='.repeat(80));
         
@@ -397,61 +516,19 @@ async function predicateJoinExample() {
         console.log('6. $map transforms arrays - like Array.map() in JavaScript');
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
-    } finally {
-        await mongoose.connection.close();
+        console.error('❌ Error in predicateJoinExample:', error.message);
     }
 }
 
-// Run the example
-predicateJoinExample();
-
-
-
-Lab Example 4: Aggregation with $group - Course Statistics
-
-// lab4-group-statistics.js
-// Using $group with $lookup - Course enrollment statistics
-
-const mongoose = require('mongoose');
-
-// MongoDB connection
-const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
-
-mongoose.connect(MONGODB_URI);
-
-// Define schemas
-const enrollmentSchema = new mongoose.Schema({
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
-    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
-    semester: String,
-    grade: String
-});
-
-const courseSchema = new mongoose.Schema({
-    courseCode: String,
-    title: String,
-    credits: Number,
-    instructor: String,
-    maxStudents: Number
-});
-
-const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
-const Course = mongoose.model('Course', courseSchema);
-
+// ============================================
+// Lab 4: Aggregation with $group
+// ============================================
 async function groupStatisticsExample() {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 Lab 4: Aggregation with $group - Course Statistics Report');
+    console.log('='.repeat(80) + '\n');
+    
     try {
-        console.log('🔍 Lab 4: Aggregation with $group - Course Statistics Report\n');
-        
-        // SQL Equivalent:
-        // SELECT c.courseCode, c.title, c.instructor, c.maxStudents,
-        //        COUNT(e.student_id) as enrolled,
-        //        COUNT(CASE WHEN e.grade = 'Withdrawn' THEN 1 END) as withdrawn,
-        //        AVG(CASE grade calculations...) as avg_gpa
-        // FROM courses c
-        // LEFT JOIN enrollments e ON c._id = e.course_id
-        // GROUP BY c._id, c.courseCode, c.title, c.instructor
-        
         const results = await Course.aggregate([
             // Stage 1: Join with enrollments
             {
@@ -502,35 +579,11 @@ async function groupStatisticsExample() {
                                             }
                                         }
                                     },
-                                    '$maxStudents'
+                                    { $ifNull: ['$maxStudents', 30] }  // Default to 30 if null
                                 ]
                             },
                             100
                         ]
-                    },
-                    
-                    // Group enrollments by semester
-                    semesterBreakdown: {
-                        $reduce: {
-                            input: '$enrollments',
-                            initialValue: {},
-                            in: {
-                                $mergeObjects: [
-                                    '$$value',
-                                    {
-                                        $cond: [
-                                            { $ne: ['$$this.grade', 'Withdrawn'] },
-                                            {
-                                                $literal: {
-                                                    $concat: ['$$this.semester']
-                                                }
-                                            },
-                                            {}
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
                     }
                 }
             },
@@ -543,7 +596,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $in: ['$$this.grade', ['A+', 'A', 'A-']] }
+                                    as: 'e',
+                                    cond: { $in: ['$$e.grade', ['A+', 'A', 'A-']] }
                                 }
                             }
                         },
@@ -551,7 +605,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $in: ['$$this.grade', ['B+', 'B', 'B-']] }
+                                    as: 'e',
+                                    cond: { $in: ['$$e.grade', ['B+', 'B', 'B-']] }
                                 }
                             }
                         },
@@ -559,7 +614,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $in: ['$$this.grade', ['C+', 'C', 'C-']] }
+                                    as: 'e',
+                                    cond: { $in: ['$$e.grade', ['C+', 'C', 'C-']] }
                                 }
                             }
                         },
@@ -567,7 +623,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $in: ['$$this.grade', ['D', 'F']] }
+                                    as: 'e',
+                                    cond: { $in: ['$$e.grade', ['D', 'F']] }
                                 }
                             }
                         },
@@ -575,7 +632,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $eq: ['$$this.grade', 'In Progress'] }
+                                    as: 'e',
+                                    cond: { $eq: ['$$e.grade', 'In Progress'] }
                                 }
                             }
                         }
@@ -591,11 +649,16 @@ async function groupStatisticsExample() {
                     title: 1,
                     instructor: 1,
                     credits: 1,
-                    maxStudents: 1,
+                    maxStudents: { $ifNull: ['$maxStudents', 30] },
                     totalEnrolled: 1,
                     withdrawnCount: 1,
                     capacityUsed: { $round: ['$capacityUsed', 1] },
-                    availableSeats: { $subtract: ['$maxStudents', '$totalEnrolled'] },
+                    availableSeats: { 
+                        $subtract: [
+                            { $ifNull: ['$maxStudents', 30] }, 
+                            '$totalEnrolled'
+                        ] 
+                    },
                     gradeDistribution: 1,
                     status: {
                         $switch: {
@@ -618,6 +681,11 @@ async function groupStatisticsExample() {
                 }
             }
         ]);
+        
+        if (results.length === 0) {
+            console.log('No courses found.');
+            return;
+        }
         
         console.log('📊 Course Enrollment Statistics Report');
         console.log('='.repeat(100));
@@ -649,13 +717,14 @@ async function groupStatisticsExample() {
                 $group: {
                     _id: null,
                     totalCourses: { $sum: 1 },
-                    totalSeats: { $sum: '$maxStudents' },
+                    totalSeats: { $sum: { $ifNull: ['$maxStudents', 30] } },
                     totalEnrollments: {
                         $sum: {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $ne: ['$$this.grade', 'Withdrawn'] }
+                                    as: 'e',
+                                    cond: { $ne: ['$$e.grade', 'Withdrawn'] }
                                 }
                             }
                         }
@@ -665,7 +734,8 @@ async function groupStatisticsExample() {
                             $size: {
                                 $filter: {
                                     input: '$enrollments',
-                                    cond: { $ne: ['$$this.grade', 'Withdrawn'] }
+                                    as: 'e',
+                                    cond: { $ne: ['$$e.grade', 'Withdrawn'] }
                                 }
                             }
                         }
@@ -691,77 +761,33 @@ async function groupStatisticsExample() {
         console.log('5. Complex calculations can be done within the aggregation pipeline');
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
-    } finally {
-        await mongoose.connection.close();
+        console.error('❌ Error in groupStatisticsExample:', error.message);
     }
 }
 
-// Run the example
-groupStatisticsExample();
-
-
-
-Lab Example 5: Advanced Multi-Collection Join - Student Transcripts
-
-// lab5-student-transcripts.js
-// Advanced multi-collection join - Complete student transcripts with GPA
-
-const mongoose = require('mongoose');
-
-// MongoDB connection
-const MONGODB_URI = 'mongodb+srv://username:password@cluster.mongodb.net/collegeDB?retryWrites=true&w=majority';
-
-mongoose.connect(MONGODB_URI);
-
-// Define schemas
-const studentSchema = new mongoose.Schema({
-    studentId: String,
-    name: String,
-    email: String,
-    program: String
-});
-
-const enrollmentSchema = new mongoose.Schema({
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
-    course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
-    semester: String,
-    grade: String
-});
-
-const courseSchema = new mongoose.Schema({
-    courseCode: String,
-    title: String,
-    credits: Number,
-    instructor: String
-});
-
-const Student = mongoose.model('Student', studentSchema);
-const Enrollment = mongoose.model('Enrollment', enrollmentSchema);
-const Course = mongoose.model('Course', courseSchema);
-
+// ============================================
+// Lab 5: Advanced Multi-Collection Join
+// ============================================
 async function studentTranscriptExample() {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 Lab 5: Advanced Multi-Collection Join - Student Transcripts with GPA');
+    console.log('='.repeat(80) + '\n');
+    
     try {
-        console.log('🔍 Lab 5: Advanced Multi-Collection Join - Student Transcripts with GPA\n');
-        
-        // This is equivalent to a complex SQL query with multiple JOINs,
-        // GROUP BY, and calculated fields
-        
         // Get a specific student's ID first
-        const targetStudent = await Student.findOne({ studentId: 'S10001' });
+        let targetStudent = await Student.findOne({ studentId: 'S10001' });
         
         if (!targetStudent) {
             console.log('Student S10001 not found. Using first available student...');
-            const firstStudent = await Student.findOne();
-            if (!firstStudent) {
+            targetStudent = await Student.findOne();
+            if (!targetStudent) {
                 console.log('No students found in database!');
                 return;
             }
-            targetStudent._id = firstStudent._id;
         }
         
         const transcripts = await Student.aggregate([
-            // Stage 1: Match specific student (or remove this for all students)
+            // Stage 1: Match specific student
             {
                 $match: {
                     _id: targetStudent._id
@@ -868,21 +894,6 @@ async function studentTranscriptExample() {
                             input: '$enrollmentHistory',
                             as: 'enrollment',
                             cond: { $eq: ['$$enrollment.grade', 'In Progress'] }
-                        }
-                    },
-                    
-                    // Group by semester
-                    semesterGroups: {
-                        $reduce: {
-                            input: '$enrollmentHistory',
-                            initialValue: [],
-                            in: {
-                                $cond: {
-                                    if: { $in: ['$$this.semester', '$$value.semester'] },
-                                    then: '$$value',
-                                    else: { $concatArrays: ['$$value', [{ semester: '$$this.semester' }]] }
-                                }
-                            }
                         }
                     }
                 }
@@ -1012,6 +1023,8 @@ async function studentTranscriptExample() {
                     );
                 });
             });
+        } else {
+            console.log('No transcript data found for the student.');
         }
         
         console.log('\n💡 Key Learning Points:');
@@ -1023,45 +1036,57 @@ async function studentTranscriptExample() {
         console.log('6. Sub-pipelines in $lookup can have their own multi-stage logic');
         
     } catch (error) {
-        console.error('❌ Error:', error.message);
-    } finally {
-        await mongoose.connection.close();
+        console.error('❌ Error in studentTranscriptExample:', error.message);
     }
 }
 
-// Run the example
-studentTranscriptExample();
+// Main function to run all examples
+async function main() {
+    try {
+        // Wait for connection to be established
+        await new Promise(resolve => {
+            if (mongoose.connection.readyState === 1) {
+                resolve();
+            } else {
+                mongoose.connection.once('open', resolve);
+            }
+        });
+        
+        console.log('\n🚀 Starting MongoDB Aggregation Examples...\n');
+        console.log('📌 Make sure you have run the seed script to populate data!\n');
+        
+        // Check if we have data
+        const studentCount = await Student.countDocuments();
+        const courseCount = await Course.countDocuments();
+        const enrollmentCount = await Enrollment.countDocuments();
+        
+        console.log(`📊 Current database state:`);
+        console.log(`   Students: ${studentCount}`);
+        console.log(`   Courses: ${courseCount}`);
+        console.log(`   Enrollments: ${enrollmentCount}\n`);
+        
+        if (studentCount === 0 || courseCount === 0 || enrollmentCount === 0) {
+            console.log('⚠️  Warning: Database appears to be empty. Please run the seed script first.');
+            console.log('   Run: node seed-data.js\n');
+        }
+        
+        // Run all examples
+        await basicLookupExample();
+        await lookupWithUnwindExample();
+        await predicateJoinExample();
+        await groupStatisticsExample();
+        await studentTranscriptExample();
+        
+        console.log('\n✅ All aggregation examples completed!');
+        
+    } catch (error) {
+        console.error('❌ Fatal error:', error);
+    } finally {
+        // Close the connection
+        await mongoose.connection.close();
+        console.log('\n👋 Connection closed');
+    }
+}
 
-
-
-
-Summary: MongoDB Aggregation Best Practices
-Key Concepts to Remember:
-
-Pipeline Order Matters
-
-Put $match early to filter documents
-This reduces the data flowing through subsequent stages
-
-
-$lookup vs populate()
-
-populate() is simpler but limited
-$lookup in aggregation is more powerful and flexible
-
-
-Handling Arrays from $lookup
-
-$lookup always returns an array
-Use $unwind to flatten 1:1 relationships
-Use $filter to work with array elements
-
-
-Performance Tips
-
-Create indexes on fields used in localField and foreignField
-Use $project to limit fields early in the pipeline
-Consider using allowDiskUse: true for large datasets
-
-
-
+// Run the main function
+main();
