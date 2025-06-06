@@ -1,0 +1,549 @@
+Men's Clothing Emporium app features:
+1. Update and Delete Functionality
+
+Edit Products: Click the "Edit" button to modify product details
+Delete Products: Click the "Delete" button with confirmation prompt
+Cascading Delete: When a product is deleted, it's also removed from the cart
+
+2. Shopping Cart with MongoDB Aggregation
+
+Add to Cart: Click "Add to Cart" button on any product
+Cart Management: View all items in cart with quantity tracking
+Remove Items: Remove individual items from cart
+Clear Cart: Empty entire cart with one click
+
+3. MongoDB Aggregation for Total Price
+
+Uses $lookup to join cart items with products
+Uses $group with $sum to calculate total price
+Demonstrates the MongoDB equivalent of SQL's SUM aggregate function
+
+Key Learning Points for Your MADS 4012 Class:
+
+CRUD Operations:
+
+CREATE: Add new products
+READ: Display products and cart
+UPDATE: Edit existing products
+DELETE: Remove products
+
+
+MongoDB Aggregation Pipeline:
+javascriptCart.aggregate([
+  { $lookup: {...} },  // Join with products collection
+  { $unwind: '$product' },  // Flatten the array
+  { $group: { _id: null, total: { $sum: {...} } } }  // Calculate sum
+])
+
+Best Practices Demonstrated:
+
+Error handling with try-catch blocks
+Proper use of async/await
+Data validation on forms
+User confirmations for destructive actions
+Responsive UI design
+
+
+Additional Features:
+
+Quantity tracking in cart
+Subtotal calculations
+Empty state handling
+Form validation
+
+
+
+This example perfectly aligns with your course outcomes, especially:
+
+Outcome 1: Database management with MongoDB
+Outcome 2: Server-side application with Node/Express
+Outcome 3: API construction with Express routes
+Outcome 4: Server-side templates using EJS
+
+The code is production-ready and can be deployed to Railway:
+
+### index.js
+
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const bodyParser = require('body-parser');
+const app = express();
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URL || 'mongodb://localhost:27017/men_clothing_emporium', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
+
+// Define product schema
+const productSchema = new mongoose.Schema({
+  category: String,
+  name: String,
+  price: Number
+});
+
+// Define cart schema
+const cartSchema = new mongoose.Schema({
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  quantity: { type: Number, default: 1 },
+  addedAt: { type: Date, default: Date.now }
+});
+
+const Product = mongoose.model('Product', productSchema);
+const Cart = mongoose.model('Cart', cartSchema);
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+
+// Set view engine to EJS
+app.set('view engine', 'ejs');
+
+// GET route to display products and cart
+app.get('/', async (req, res) => {
+  try {
+    const products = await Product.find();
+    
+    // Get cart items with product details
+    const cartItems = await Cart.find().populate('productId');
+    
+    // Calculate total using MongoDB aggregation
+    const cartTotal = await Cart.aggregate([
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'productId',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      {
+        $group: {
+          _id: null,
+          total: { 
+            $sum: { 
+              $multiply: ['$product.price', '$quantity'] 
+            } 
+          }
+        }
+      }
+    ]);
+    
+    const totalPrice = cartTotal.length > 0 ? cartTotal[0].total : 0;
+    
+    res.render('index', { products, cartItems, totalPrice });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Server error');
+  }
+});
+
+// POST route to add product
+app.post('/add-product', async (req, res) => {
+  try {
+    const { category, name, price } = req.body;
+    const product = new Product({ category, name, price });
+    await product.save();
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error adding product');
+  }
+});
+
+// GET route to edit product form
+app.get('/edit-product/:id', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    res.render('edit', { product });
+  } catch (error) {
+    console.error(error);
+    res.redirect('/');
+  }
+});
+
+// POST route to update product
+app.post('/update-product/:id', async (req, res) => {
+  try {
+    const { category, name, price } = req.body;
+    await Product.findByIdAndUpdate(req.params.id, {
+      category,
+      name,
+      price
+    });
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error updating product');
+  }
+});
+
+// POST route to delete product
+app.post('/delete-product/:id', async (req, res) => {
+  try {
+    await Product.findByIdAndDelete(req.params.id);
+    // Also remove from cart if exists
+    await Cart.deleteMany({ productId: req.params.id });
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error deleting product');
+  }
+});
+
+// POST route to add item to cart
+app.post('/add-to-cart/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    
+    // Check if item already in cart
+    const existingItem = await Cart.findOne({ productId });
+    
+    if (existingItem) {
+      // Increment quantity if already in cart
+      existingItem.quantity += 1;
+      await existingItem.save();
+    } else {
+      // Add new item to cart
+      const cartItem = new Cart({ productId });
+      await cartItem.save();
+    }
+    
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error adding to cart');
+  }
+});
+
+// POST route to remove item from cart
+app.post('/remove-from-cart/:id', async (req, res) => {
+  try {
+    await Cart.findByIdAndDelete(req.params.id);
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error removing from cart');
+  }
+});
+
+// POST route to clear entire cart
+app.post('/clear-cart', async (req, res) => {
+  try {
+    await Cart.deleteMany({});
+    res.redirect('/');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error clearing cart');
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+
+### views/index.ejs
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Men's Clothing Emporium</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 20px; 
+      background-color: #f5f5f5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .form-section, .products-section, .cart-section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    form { margin-bottom: 20px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input, select { 
+      width: 100%; 
+      max-width: 300px;
+      padding: 8px; 
+      margin-top: 5px; 
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    button { 
+      margin-top: 15px; 
+      padding: 10px 20px; 
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background-color: #0056b3; }
+    .btn-edit {
+      background-color: #ffc107;
+      color: black;
+      padding: 5px 10px;
+      margin-right: 5px;
+    }
+    .btn-delete {
+      background-color: #dc3545;
+      padding: 5px 10px;
+      margin-right: 5px;
+    }
+    .btn-cart {
+      background-color: #28a745;
+      padding: 5px 10px;
+    }
+    .btn-remove {
+      background-color: #dc3545;
+      padding: 5px 10px;
+    }
+    table { 
+      border-collapse: collapse; 
+      width: 100%; 
+      margin-top: 20px; 
+    }
+    th, td { 
+      border: 1px solid #ddd; 
+      padding: 12px; 
+      text-align: left; 
+    }
+    th { 
+      background-color: #f8f9fa; 
+      font-weight: bold;
+    }
+    tr:nth-child(even) { background-color: #f8f9fa; }
+    .actions { white-space: nowrap; }
+    .cart-total {
+      font-size: 1.2em;
+      font-weight: bold;
+      text-align: right;
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #e9ecef;
+      border-radius: 4px;
+    }
+    .empty-cart {
+      text-align: center;
+      color: #666;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Men's Clothing Emporium</h1>
+    
+    <div class="form-section">
+      <h2>Add New Product</h2>
+      <form action="/add-product" method="POST">
+        <label for="category">Product Category:</label>
+        <select name="category" id="category" required>
+          <option value="outer wear">Outer Wear</option>
+          <option value="formal wear">Formal Wear</option>
+          <option value="sports ware">Sports Ware</option>
+          <option value="outdoor ware">Outdoor Ware</option>
+        </select>
+
+        <label for="name">Product Name:</label>
+        <input type="text" id="name" name="name" required />
+
+        <label for="price">Product Price:</label>
+        <input type="number" id="price" name="price" step="0.01" min="0" required />
+
+        <button type="submit">Add Product</button>
+      </form>
+    </div>
+
+    <div class="products-section">
+      <h2>Products Inventory</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Name</th>
+            <th>Price</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (products.length === 0) { %>
+            <tr>
+              <td colspan="4" style="text-align: center;">No products available</td>
+            </tr>
+          <% } else { %>
+            <% products.forEach(product => { %>
+              <tr>
+                <td><%= product.category %></td>
+                <td><%= product.name %></td>
+                <td>$<%= product.price.toFixed(2) %></td>
+                <td class="actions">
+                  <a href="/edit-product/<%= product._id %>">
+                    <button class="btn-edit">Edit</button>
+                  </a>
+                  <form action="/delete-product/<%= product._id %>" method="POST" style="display: inline;">
+                    <button type="submit" class="btn-delete" onclick="return confirm('Are you sure you want to delete this product?')">Delete</button>
+                  </form>
+                  <form action="/add-to-cart/<%= product._id %>" method="POST" style="display: inline;">
+                    <button type="submit" class="btn-cart">Add to Cart</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cart-section">
+      <h2>Shopping Cart</h2>
+      <% if (cartItems.length === 0) { %>
+        <div class="empty-cart">Your cart is empty</div>
+      <% } else { %>
+        <table>
+          <thead>
+            <tr>
+              <th>Product Name</th>
+              <th>Category</th>
+              <th>Price</th>
+              <th>Quantity</th>
+              <th>Subtotal</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% cartItems.forEach(item => { %>
+              <% if (item.productId) { %>
+                <tr>
+                  <td><%= item.productId.name %></td>
+                  <td><%= item.productId.category %></td>
+                  <td>$<%= item.productId.price.toFixed(2) %></td>
+                  <td><%= item.quantity %></td>
+                  <td>$<%= (item.productId.price * item.quantity).toFixed(2) %></td>
+                  <td>
+                    <form action="/remove-from-cart/<%= item._id %>" method="POST" style="display: inline;">
+                      <button type="submit" class="btn-remove">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              <% } %>
+            <% }) %>
+          </tbody>
+        </table>
+        
+        <div class="cart-total">
+          Total Price (using MongoDB aggregation): $<%= totalPrice.toFixed(2) %>
+        </div>
+        
+        <form action="/clear-cart" method="POST" style="margin-top: 10px;">
+          <button type="submit" class="btn-delete" onclick="return confirm('Are you sure you want to clear the entire cart?')">Clear Cart</button>
+        </form>
+      <% } %>
+    </div>
+  </div>
+</body>
+</html>
+
+
+###  views/edit.ejs
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Edit Product - Men's Clothing Emporium</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 20px; 
+      background-color: #f5f5f5;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; }
+    form { margin-top: 20px; }
+    label { 
+      display: block; 
+      margin-top: 15px; 
+      font-weight: bold;
+      color: #555;
+    }
+    input, select { 
+      width: 100%; 
+      padding: 10px; 
+      margin-top: 5px; 
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    button { 
+      margin-top: 20px; 
+      padding: 12px 24px; 
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-update {
+      background-color: #007bff;
+      color: white;
+      margin-right: 10px;
+    }
+    .btn-update:hover { background-color: #0056b3; }
+    .btn-cancel {
+      background-color: #6c757d;
+      color: white;
+    }
+    .btn-cancel:hover { background-color: #5a6268; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Edit Product</h1>
+    
+    <form action="/update-product/<%= product._id %>" method="POST">
+      <label for="category">Product Category:</label>
+      <select name="category" id="category" required>
+        <option value="outer wear" <%= product.category === 'outer wear' ? 'selected' : '' %>>Outer Wear</option>
+        <option value="formal wear" <%= product.category === 'formal wear' ? 'selected' : '' %>>Formal Wear</option>
+        <option value="sports ware" <%= product.category === 'sports ware' ? 'selected' : '' %>>Sports Ware</option>
+        <option value="outdoor ware" <%= product.category === 'outdoor ware' ? 'selected' : '' %>>Outdoor Ware</option>
+      </select>
+
+      <label for="name">Product Name:</label>
+      <input type="text" id="name" name="name" value="<%= product.name %>" required />
+
+      <label for="price">Product Price:</label>
+      <input type="number" id="price" name="price" value="<%= product.price %>" step="0.01" min="0" required />
+
+      <div style="margin-top: 20px;">
+        <button type="submit" class="btn-update">Update Product</button>
+        <a href="/" style="text-decoration: none;">
+          <button type="button" class="btn-cancel">Cancel</button>
+        </a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
+
+
+
